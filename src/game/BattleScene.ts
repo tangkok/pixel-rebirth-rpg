@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { createBattleArt } from "./battleArt";
 import { activeFighter, type Battle, type CombatEvent } from "./tactics";
+import { CLASSES, type ClassId } from "./lineage";
+import { MOTIONS, motionTiming, type MotionStyle } from "./combatMotion";
 
 interface ActorView {
   image: Phaser.GameObjects.Image;
@@ -21,6 +23,14 @@ export class BattleScene extends Phaser.Scene {
   private loading?: Phaser.GameObjects.Text;
   private animating = false;
   private backdropFailed = false;
+  reducedMotion = false;
+  presentation = {
+    phase: "idle",
+    pose: "idle",
+    style: "slash",
+    effectsSpawned: 0,
+  };
+  private effects = new Set<Phaser.GameObjects.GameObject>();
   constructor(
     private hooks: { ready: () => void; select: (id: string) => void },
     private pixelDensity = 1,
@@ -40,6 +50,10 @@ export class BattleScene extends Phaser.Scene {
     this.load.image(
       "hero-sheet",
       `${import.meta.env.BASE_URL}art/party-sprites.webp`,
+    );
+    this.load.image(
+      "pose-sheet",
+      `${import.meta.env.BASE_URL}art/classes-poses.webp`,
     );
     this.load.image(
       "enemy-sheet",
@@ -115,7 +129,7 @@ export class BattleScene extends Phaser.Scene {
       v.shadow.setAlpha(a.hp > 0 ? 0.6 : 0.15);
       v.label.setText(a.name).setAlpha(a.hp > 0 ? 1 : 0.25);
       v.image.flipX =
-        a.classId === "ranger" ||
+        (a.classId === "ranger" && !this.textures.exists("pose-sheet")) ||
         (a.side === "enemy" && !this.textures.exists("enemy-sheet"));
     }
     for (const [id, v] of this.views)
@@ -153,25 +167,32 @@ export class BattleScene extends Phaser.Scene {
       this.background.setPosition(w * 0.5, h * 0.5).setScale(scale);
     }
     if (!this.battle) return;
-    const party = this.battle.actors.filter((a) => a.side === "party"),
-      enemies = this.battle.actors.filter((a) => a.side === "enemy");
     for (const a of this.battle.actors) {
       const v = this.views.get(a.id)!;
-      const i = (a.side === "party" ? party : enemies).indexOf(a);
-      v.x = w * (a.side === "party" ? 0.76 : 0.26);
-      v.y = h * (mobile ? 0.79 : 0.66);
-      const factor = Phaser.Math.Clamp(w / 1180, 0.7, 1.2);
-      const wantedHeight =
+      v.x = w * (a.side === "party" ? 0.76 : mobile ? 0.29 : 0.26);
+      v.y = h * 0.82;
+      const factor = Phaser.Math.Clamp(w / 1180, 0.65, 1.15);
+      const maxHeight = Math.max(
+        48,
+        h * 0.82 - (h < 300 ? 62 : mobile ? 155 : 105),
+      );
+      const desired = Math.min(
         (a.side === "party"
           ? 230
           : a.classId === "dragon"
             ? 255
             : a.classId === "wisp"
               ? 210
-              : 245) * factor;
-      v.scale = wantedHeight / v.image.height;
-      v.image.setScale(v.scale);
-      if (!this.animating) v.image.setPosition(v.x, v.y);
+              : 245) * factor,
+        maxHeight,
+      );
+      // Keep the complete figure inside both the field and its allotted side.
+      v.scale = Math.min(
+        desired / v.image.height,
+        (w * (a.side === "enemy" ? 0.48 : 0.35)) / v.image.width,
+      );
+      if (!this.animating)
+        v.image.setPosition(v.x, v.y).setScale(v.scale).setAngle(0);
       v.image.setDepth(v.y);
       v.shadow
         .setPosition(v.x, v.y + 1)
@@ -180,7 +201,7 @@ export class BattleScene extends Phaser.Scene {
           Math.max(12, v.image.displayHeight * 0.07) / 17,
         )
         .setDepth(v.y - 1);
-      const bw = (a.side === "enemy" ? 140 : 110) * factor;
+      const bw = Math.min((a.side === "enemy" ? 140 : 110) * factor, w * 0.3);
       v.label
         .setResolution(this.pixelDensity)
         .setPosition(v.x, v.y + 10)
@@ -206,10 +227,15 @@ export class BattleScene extends Phaser.Scene {
       const a = this.battle?.actors.find((a) => a.id === id);
       if (!a || a.hp <= 0) continue;
       if (!this.animating) {
+        const breathing = this.reducedMotion ? 0 : Math.sin(time / 650 + v.x);
+        v.image.setScale(
+          v.scale * (1 - breathing * 0.008),
+          v.scale * (1 + breathing * 0.012),
+        );
         v.image.y =
           v.y +
           Math.sin(time / (a.classId === "wisp" ? 550 : 850) + v.x) *
-            (a.classId === "wisp" ? 8 : 2);
+            (this.reducedMotion ? 0 : a.classId === "wisp" ? 6 : 1);
         v.image.x = v.x;
       }
       if (current?.id === id && this.battle?.phase === "ready") {
@@ -270,6 +296,7 @@ export class BattleScene extends Phaser.Scene {
         .fillEllipse(x, h * 0.83 + i * 8, w * 0.8, 56);
     }
   }
+  /** Pose changes and visual clocks never change the authoritative battle state. */
   async play(
     events: CombatEvent[],
     battle: Battle,
@@ -277,134 +304,388 @@ export class BattleScene extends Phaser.Scene {
   ): Promise<void> {
     if (!events.length) return;
     this.animating = true;
-    const source = this.views.get(events[0].actor),
-      victim = this.views.get(events[0].target),
-      duration = fast ? 150 : 260;
-    if (
-      source &&
-      victim &&
-      events[0].type === "damage" &&
-      ["physical", "boost"].includes(events[0].element)
-    )
-      await this.tween({
-        targets: source.image,
-        x: victim.x + (source.x > victim.x ? 55 : -55),
-        duration,
-        ease: "Cubic.easeIn",
-      });
-    for (const event of events) {
-      const v = this.views.get(event.target);
-      if (!v) continue;
-      const color =
-        event.type === "heal"
-          ? 0x93f0b1
-          : event.element === "arcanist"
-            ? 0x87dfff
-            : event.element === "ranger"
-              ? 0xc5b0ff
-              : event.element === "guard"
-                ? 0xe7ce94
-                : 0xffd89a;
-      const g = this.add
-        .graphics()
-        .setDepth(1500)
-        .setBlendMode(Phaser.BlendModes.ADD);
-      if (event.type === "guard") {
-        g.lineStyle(3, color, 0.8).strokeEllipse(v.x, v.y - 35, 70, 90);
-      } else if (event.type === "damage") {
-        g.lineStyle(18, color, 0.1).lineBetween(
-          v.x - 45,
-          v.y + 4,
-          v.x + 34,
-          v.y - 84,
-        );
-        g.lineStyle(6, color, 0.55).lineBetween(
-          v.x - 45,
-          v.y + 4,
-          v.x + 34,
-          v.y - 84,
-        );
-        g.lineStyle(2, 0xffffff, 0.95).lineBetween(
-          v.x - 45,
-          v.y + 4,
-          v.x + 34,
-          v.y - 84,
-        );
-        for (let i = 0; i < 12; i++) {
-          const angle = (i * Math.PI) / 6;
-          g.lineStyle(2, color, 0.7).lineBetween(
-            v.x + Math.cos(angle) * 16,
-            v.y - 30 + Math.sin(angle) * 16,
-            v.x + Math.cos(angle) * 48,
-            v.y - 30 + Math.sin(angle) * 48,
+    const event = events[0],
+      source = this.views.get(event.actor),
+      victim = this.views.get(event.target);
+    const actor = battle.actors.find((a) => a.id === event.actor)!;
+    const timing = motionTiming(fast, this.reducedMotion);
+    const cls = Object.hasOwn(CLASSES, event.element)
+      ? (event.element as ClassId)
+      : Object.hasOwn(CLASSES, actor.classId)
+        ? (actor.classId as ClassId)
+        : null;
+    const motion = cls
+      ? MOTIONS[cls]
+      : {
+          style:
+            actor.classId === "wisp" ? ("astral" as const) : ("claw" as const),
+          ranged: actor.classId === "wisp",
+          color: 0xe4bc88,
+        };
+    const style: MotionStyle =
+      event.type === "heal"
+        ? "heal"
+        : event.type === "guard"
+          ? "guard"
+          : motion.style;
+    this.presentation = {
+      ...this.presentation,
+      phase: "windup",
+      pose: "idle",
+      style,
+    };
+    try {
+      if (source) {
+        const direction = victim && victim.x < source.x ? -1 : 1;
+        if (!this.reducedMotion)
+          await this.tween({
+            targets: source.image,
+            x: source.x - direction * 9,
+            angle: -direction * 5,
+            scaleY: source.scale * 0.95,
+            duration: timing.windup,
+            ease: "Sine.easeOut",
+          });
+        else await this.delay(timing.windup);
+        const actionKey = `battle-${actor.classId}-action`;
+        if (this.textures.exists(actionKey))
+          source.image.setTexture(actionKey).setFlipX(false);
+        this.presentation.phase = "strike";
+        this.presentation.pose = "action";
+        if (event.type === "damage" && victim) {
+          if (motion.ranged) {
+            await this.tween({
+              targets: source.image,
+              angle: 0,
+              y: source.y - 4,
+              duration: timing.travel * 0.4,
+              ease: "Back.easeOut",
+            });
+            await this.projectile(
+              source,
+              victim,
+              motion.color,
+              style,
+              timing.travel,
+            );
+          } else {
+            const x = this.reducedMotion
+              ? source.x
+              : victim.x -
+                direction * Math.max(50, victim.image.displayWidth * 0.3);
+            await this.tween({
+              targets: source.image,
+              x,
+              y: source.y,
+              angle: direction * 8,
+              scaleX: source.scale * 1.04,
+              scaleY: source.scale,
+              duration: timing.travel,
+              ease: "Cubic.easeIn",
+            });
+          }
+        } else await this.delay(timing.travel * 0.45);
+      }
+      this.presentation.phase = "impact";
+      for (const hit of events) {
+        const v = this.views.get(hit.target);
+        if (!v) continue;
+        const color =
+          hit.type === "heal"
+            ? 0x92efb5
+            : hit.type === "guard"
+              ? 0xe7ce94
+              : motion.color;
+        const hitStyle =
+          hit.type === "heal" ? "heal" : hit.type === "guard" ? "guard" : style;
+        this.impact(v, hitStyle, color, timing.effect);
+        if (hit.type === "damage") {
+          v.image.setTintFill(0xfff3dd);
+          this.time.delayedCall(this.reducedMotion ? 35 : 65, () =>
+            v.image.clearTint(),
           );
+          if (!this.reducedMotion) {
+            this.cameras.main.shake(
+              90,
+              hit.element === "physical" ? 0.0013 : 0.0023,
+            );
+            if (v !== source)
+              this.tweens.add({
+                targets: v.image,
+                x: v.x + (source && source.x > v.x ? -11 : 11),
+                angle: source && source.x > v.x ? -6 : 6,
+                scaleX: v.scale * 0.95,
+                scaleY: v.scale * 1.04,
+                duration: 90,
+                yoyo: true,
+                ease: "Sine.easeOut",
+              });
+          }
         }
-        if (event.element === "arcanist") {
-          for (let i = 0; i < 5; i++)
-            g.lineStyle(2, color, 0.65).lineBetween(
-              v.x - 50 + i * 24,
-              v.y - 160 - (i % 2) * 30,
-              v.x - 25 + i * 15,
-              v.y - 15,
+        if (hit.amount > 0)
+          this.damageNumber(v, hit.amount, hit.type === "heal", fast);
+      }
+      await this.delay(timing.impact);
+      this.presentation.phase = "recover";
+      if (source)
+        await this.tween({
+          targets: source.image,
+          x: source.x,
+          y: source.y,
+          angle: 0,
+          scaleX: source.scale,
+          scaleY: source.scale,
+          duration: timing.recover,
+          ease: "Cubic.easeOut",
+        });
+      // Keep fallen enemies on-screen for a short, readable defeat dissolve.
+      for (const dead of battle.actors.filter((a) => a.hp <= 0)) {
+        const v = this.views.get(dead.id);
+        if (v)
+          await this.tween({
+            targets: v.image,
+            alpha: 0.12,
+            y: v.y + 8,
+            duration: fast ? 130 : 250,
+            ease: "Sine.easeIn",
+          });
+      }
+    } finally {
+      this.animating = false;
+      this.presentation.phase = "idle";
+      this.presentation.pose = "idle";
+      this.sync(battle);
+    }
+  }
+  private delay(ms: number) {
+    return new Promise<void>((resolve) => {
+      this.time.delayedCall(ms, resolve);
+    });
+  }
+  private track<T extends Phaser.GameObjects.GameObject>(g: T): T {
+    this.effects.add(g);
+    this.presentation.effectsSpawned++;
+    g.once("destroy", () => this.effects.delete(g));
+    return g;
+  }
+  get activeEffectCount() {
+    return this.effects.size;
+  }
+  private async projectile(
+    source: ActorView,
+    target: ActorView,
+    color: number,
+    style: MotionStyle,
+    duration: number,
+  ) {
+    const x = source.image.x,
+      y = source.y - source.image.displayHeight * 0.5;
+    const endY = target.y - target.image.displayHeight * 0.45;
+    const beam = this.track(
+      this.add.graphics().setDepth(1400).setBlendMode(Phaser.BlendModes.ADD),
+    );
+    const p = { t: 0 };
+    const dx = target.x - x,
+      dy = endY - y;
+    await this.tween({
+      targets: p,
+      t: 1,
+      duration,
+      ease: "Quad.easeIn",
+      onUpdate: () => {
+        const px = x + dx * p.t,
+          py = y + dy * p.t;
+        beam.clear();
+        beam
+          .lineStyle(style === "arrow" ? 8 : 16, color, 0.15)
+          .lineBetween(px - dx * 0.13, py - dy * 0.13, px, py);
+        beam
+          .lineStyle(style === "arrow" ? 2 : 5, 0xf3fcff, 0.9)
+          .lineBetween(px - dx * 0.09, py - dy * 0.09, px, py);
+        beam
+          .fillStyle(color, 0.45)
+          .fillCircle(px, py, style === "arrow" ? 4 : 8);
+        beam.fillStyle(0xffffff, 0.9).fillCircle(px, py, 2);
+      },
+    });
+    beam.destroy();
+  }
+  private impact(
+    v: ActorView,
+    style: MotionStyle,
+    color: number,
+    duration: number,
+  ) {
+    const x = v.x,
+      y = v.y - v.image.displayHeight * 0.44;
+    const g = this.track(
+      this.add.graphics().setDepth(1450).setBlendMode(Phaser.BlendModes.ADD),
+    );
+    const p = { t: 0 };
+    const radius = Math.max(28, Math.min(75, v.image.displayHeight * 0.4));
+    this.tweens.add({
+      targets: p,
+      t: 1,
+      duration,
+      ease: "Quad.easeOut",
+      onUpdate: () => {
+        g.clear();
+        const fade = 1 - p.t;
+        if (style === "guard") {
+          g.lineStyle(3, color, fade * 0.8).strokePoints(
+            [
+              { x: x - radius * 0.65, y: y - radius },
+              { x: x + radius * 0.65, y: y - radius },
+              { x: x + radius * 0.56, y: y + radius * 0.25 },
+              { x, y: y + radius },
+              { x: x - radius * 0.56, y: y + radius * 0.25 },
+            ],
+            true,
+          );
+          g.lineStyle(1, 0xffffff, fade * 0.5).strokeEllipse(
+            x,
+            y,
+            radius * 1.8,
+            radius * 2.3,
+          );
+        } else if (style === "heal" || style === "radiant") {
+          g.lineStyle(2, color, fade * 0.8).strokeEllipse(
+            x,
+            v.y - 6,
+            radius * (1.2 + p.t),
+            radius * 0.55,
+          );
+          g.fillStyle(color, fade * 0.07).fillEllipse(
+            x,
+            y,
+            radius * 1.1,
+            radius * 2.5,
+          );
+          if (style === "radiant")
+            g.lineStyle(6, color, fade * 0.7).lineBetween(
+              x,
+              y - radius * 1.5,
+              x,
+              y + radius * 0.8,
+            );
+          for (let i = 0; i < 5; i++) {
+            const a = i * 1.256 + p.t * 3;
+            g.fillStyle(color, fade * 0.8).fillCircle(
+              x + Math.cos(a) * radius * 0.6,
+              y + radius - p.t * radius * 2 + Math.sin(a) * 12,
+              2,
+            );
+          }
+        } else if (style === "astral") {
+          g.lineStyle(2, color, fade * 0.65).strokeCircle(
+            x,
+            y,
+            radius * (0.4 + p.t),
+          );
+          for (let i = 0; i < 5; i++) {
+            const k = (p.t + i * 0.08) % 1,
+              dx = (i - 2) * radius * 0.32;
+            g.lineStyle(4, color, fade * 0.6).lineBetween(
+              x + dx - 12,
+              y - radius * 2 + k * radius * 2.3,
+              x + dx,
+              y - radius * 1.4 + k * radius * 2.3,
+            );
+          }
+        } else {
+          const strikes = style === "daggers" ? 2 : 1;
+          for (let i = 0; i < strikes; i++) {
+            const start = -2.5 + i * 1.7,
+              end = start + (0.3 + p.t * 2.5);
+            g.lineStyle(style === "flame" ? 22 : 16, color, fade * 0.09)
+              .beginPath()
+              .arc(x, y, radius, start, end)
+              .strokePath();
+            g.lineStyle(6, color, fade * 0.65)
+              .beginPath()
+              .arc(x, y, radius, start, end)
+              .strokePath();
+            g.lineStyle(2, 0xffffff, fade * 0.9)
+              .beginPath()
+              .arc(x, y, radius - 2, start, end)
+              .strokePath();
+          }
+          if (style === "arrow")
+            g.lineStyle(3, color, fade).lineBetween(
+              x - radius,
+              y + radius * 0.4,
+              x + radius,
+              y - radius * 0.4,
             );
         }
-        v.image.setTintFill(0xffffff);
-        this.time.delayedCall(90, () => v.image.clearTint());
-        this.cameras.main.shake(
-          fast ? 80 : 150,
-          event.element === "physical" ? 0.0015 : 0.003,
-        );
-      } else {
-        g.lineStyle(2, color, 0.8).strokeCircle(v.x, v.y - 35, 36);
-        g.fillStyle(color, 0.16).fillCircle(v.x, v.y - 35, 42);
-      }
+      },
+      onComplete: () => g.destroy(),
+    });
+    const count = this.reducedMotion ? 4 : style === "flame" ? 20 : 12;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2,
+        dist = radius * (0.5 + (i % 4) * 0.3);
+      const dot = this.track(
+        this.add
+          .circle(x, y, i % 3 === 0 ? 2.5 : 1.5, color, 0.85)
+          .setDepth(1500)
+          .setBlendMode(Phaser.BlendModes.ADD),
+      );
       this.tweens.add({
-        targets: g,
+        targets: dot,
+        x: x + Math.cos(angle) * dist,
+        y: y + Math.sin(angle) * dist - (style === "heal" ? 40 : 0),
         alpha: 0,
-        duration: fast ? 280 : 600,
-        onComplete: () => g.destroy(),
-      });
-      if (event.amount > 0) {
-        const t = this.add
-          .text(
-            v.x,
-            v.y - v.image.displayHeight - 15,
-            event.type === "heal" ? `+${event.amount}` : `${event.amount}`,
-            {
-              fontFamily: "Space Grotesk Variable, sans-serif",
-              fontSize:
-                this.scale.width / this.pixelDensity < 700 ? "26px" : "36px",
-              fontStyle: "bold",
-              color: event.type === "heal" ? "#b0f4c6" : "#fff2d5",
-              stroke: "#182a32",
-              strokeThickness: 4,
-              resolution: this.pixelDensity,
-            },
-          )
-          .setOrigin(0.5)
-          .setDepth(1600);
-        this.tweens.add({
-          targets: t,
-          y: t.y - 40,
-          alpha: 0,
-          duration: fast ? 500 : 950,
-          ease: "Cubic.easeOut",
-          onComplete: () => t.destroy(),
-        });
-      }
-    }
-    if (source)
-      await this.tween({
-        targets: source.image,
-        x: source.x,
-        y: source.y,
-        duration: fast ? 160 : 300,
+        scale: 0.25,
+        delay: (i % 3) * 12,
+        duration: duration * 0.8,
         ease: "Cubic.easeOut",
+        onComplete: () => dot.destroy(),
       });
-    else
-      await new Promise<void>((resolve) => this.time.delayedCall(250, resolve));
-    this.animating = false;
-    this.sync(battle);
+    }
+  }
+  private damageNumber(
+    v: ActorView,
+    amount: number,
+    heal: boolean,
+    fast: boolean,
+  ) {
+    const text = this.track(
+      this.add
+        .text(
+          v.x,
+          Math.max(72, v.y - v.image.displayHeight - 8),
+          heal ? `+${amount}` : `${amount}`,
+          {
+            fontFamily: "Space Grotesk Variable, sans-serif",
+            fontSize:
+              this.scale.width / this.pixelDensity < 700 ? "27px" : "34px",
+            fontStyle: "bold",
+            color: heal ? "#b0f4c6" : "#fff2d5",
+            stroke: "#182a32",
+            strokeThickness: 4,
+            resolution: this.pixelDensity,
+          },
+        )
+        .setOrigin(0.5)
+        .setDepth(1600),
+    );
+    this.tweens.add({
+      targets: text,
+      scale: 1.2,
+      duration: 90,
+      yoyo: true,
+      ease: "Back.easeOut",
+    });
+    this.tweens.add({
+      targets: text,
+      y: text.y - 35,
+      alpha: 0,
+      delay: 100,
+      duration: fast ? 380 : 720,
+      ease: "Cubic.easeOut",
+      onComplete: () => text.destroy(),
+    });
   }
   private tween(config: Phaser.Types.Tweens.TweenBuilderConfig): Promise<void> {
     return new Promise((resolve) => {

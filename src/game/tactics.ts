@@ -1,15 +1,32 @@
-export type ClassId = "warden" | "arcanist" | "ranger";
+import {
+  CLASSES,
+  type ClassId,
+  type RaceId,
+  raceById,
+  sampleRace,
+  subclassBonus,
+  RACE_REROLL_COST,
+  SUBCLASS_LEVEL,
+  MAX_SKILL_RANK,
+} from "./lineage";
+export { CLASSES, type ClassId } from "./lineage";
 export type Talent = "might" | "vitality" | "spirit" | "haste";
-export type ActionId = "attack" | "skill" | "restore" | "guard" | "item";
+export type ActionId =
+  "attack" | "skill" | "restore" | "guard" | "item" | "secondary";
 export interface Build {
   id: string;
   name: string;
   classId: ClassId;
   talents: Record<Talent, number>;
   upgraded: boolean;
+  raceId: RaceId | null;
+  subClassId: ClassId | null;
+  skillRank: number;
 }
 export interface TacticsSave {
-  version: 3;
+  version: 4;
+  created: boolean;
+  raceRolls: number;
   level: number;
   xp: number;
   gold: number;
@@ -18,6 +35,7 @@ export interface TacticsSave {
   cleared: number[];
   builds: Build[];
   sound: boolean;
+  reducedMotion: boolean;
 }
 export interface Fighter {
   id: string;
@@ -35,6 +53,8 @@ export interface Fighter {
   bp: number;
   guarding: boolean;
   broken: number;
+  subClassId?: ClassId | null;
+  skillRank?: number;
 }
 export interface Battle {
   stage: number;
@@ -54,55 +74,8 @@ export interface CombatEvent {
   element: string;
 }
 export const PARTY_KEY = "pixel-rebirth-tactics-v2";
-export const TACTICS_KEY = "pixel-rebirth-solo-v3";
-export const CLASSES: Record<
-  ClassId,
-  {
-    name: string;
-    thai: string;
-    role: string;
-    skill: string;
-    description: string;
-    color: string;
-    weapon: string;
-    upgrade: string;
-    cost: number;
-  }
-> = {
-  warden: {
-    name: "Dawn Warden",
-    thai: "อัศวินรุ่งอรุณ",
-    role: "VANGUARD",
-    skill: "Sunbreak",
-    description: "นักดาบแนวหน้า ทนทานและทำลายเกราะศัตรู",
-    color: "#e9b56e",
-    weapon: "Dawnsteel blade",
-    upgrade: "Solstice greatsword",
-    cost: 12,
-  },
-  arcanist: {
-    name: "Starweaver",
-    thai: "จอมเวทดวงดาว",
-    role: "ARCANIST",
-    skill: "Astral Rain",
-    description: "เวทดวงดาวรุนแรง พร้อมเวทฟื้นฟูพลังให้ตัวเอง",
-    color: "#83d9de",
-    weapon: "Lunar staff",
-    upgrade: "Celestial scepter",
-    cost: 18,
-  },
-  ranger: {
-    name: "Veil Ranger",
-    thai: "พรานแห่งม่านหมอก",
-    role: "STRIKER",
-    skill: "Piercing Gale",
-    description: "ความเร็วสูง โจมตีแม่นยำและทะลุเกราะ",
-    color: "#b3a1ed",
-    weapon: "Whisperwood bow",
-    upgrade: "Eclipse longbow",
-    cost: 12,
-  },
-};
+export const SOLO_KEY = "pixel-rebirth-solo-v3";
+export const TACTICS_KEY = "pixel-rebirth-lineage-v4";
 export const STAGES = [
   {
     name: "The Hollow Sanctuary",
@@ -132,7 +105,9 @@ export const STAGES = [
 ] as const;
 const zeroTalents = () => ({ might: 0, vitality: 0, spirit: 0, haste: 0 });
 export const freshTactics = (): TacticsSave => ({
-  version: 3,
+  version: 4,
+  created: false,
+  raceRolls: 3,
   level: 1,
   xp: 0,
   gold: 150,
@@ -140,6 +115,7 @@ export const freshTactics = (): TacticsSave => ({
   unlocked: 0,
   cleared: [],
   sound: false,
+  reducedMotion: false,
   builds: [
     {
       id: "ash",
@@ -147,6 +123,9 @@ export const freshTactics = (): TacticsSave => ({
       classId: "warden",
       talents: zeroTalents(),
       upgraded: false,
+      raceId: null,
+      subClassId: null,
+      skillRank: 0,
     },
   ],
 });
@@ -178,6 +157,7 @@ export function switchClass(
   if (!b || !Object.hasOwn(CLASSES, classId) || b.classId === classId)
     return false;
   b.classId = classId;
+  if (b.subClassId === classId) b.subClassId = null;
   return true;
 }
 export function upgradeWeapon(s: TacticsSave, id: string): boolean {
@@ -194,13 +174,21 @@ export function buyPotions(s: TacticsSave): boolean {
   return true;
 }
 export function stats(b: Build, level: number): Fighter {
-  const base = {
-    warden: [240, 66, 40, 25, 17, 22],
-    arcanist: [190, 90, 25, 48, 12, 24],
-    ranger: [210, 72, 39, 30, 13, 31],
-  }[b.classId];
-  const hp = base[0] + (level - 1) * 18 + b.talents.vitality * 18,
-    mp = base[1] + (level - 1) * 4 + b.talents.spirit * 6;
+  const base = CLASSES[b.classId].base;
+  const bonus = raceById(b.raceId)?.bonus ?? {};
+  const sub = subclassBonus(b.subClassId);
+  const hp =
+      base.hp +
+      (level - 1) * 18 +
+      b.talents.vitality * 18 +
+      (bonus.hp ?? 0) +
+      sub.hp,
+    mp =
+      base.mp +
+      (level - 1) * 4 +
+      b.talents.spirit * 6 +
+      (bonus.mp ?? 0) +
+      sub.mp;
   return {
     id: b.id,
     name: b.name,
@@ -211,11 +199,27 @@ export function stats(b: Build, level: number): Fighter {
     mp,
     maxMp: mp,
     attack:
-      base[2] + (level - 1) * 3 + b.talents.might * 4 + (b.upgraded ? 12 : 0),
+      base.attack +
+      (level - 1) * 3 +
+      b.talents.might * 4 +
+      (b.upgraded ? 12 : 0) +
+      (bonus.attack ?? 0) +
+      sub.attack,
     magic:
-      base[3] + (level - 1) * 3 + b.talents.spirit * 4 + (b.upgraded ? 10 : 0),
-    defense: base[4] + b.talents.vitality * 2,
-    speed: base[5] + b.talents.haste * 3,
+      base.magic +
+      (level - 1) * 3 +
+      b.talents.spirit * 4 +
+      (b.upgraded ? 10 : 0) +
+      (bonus.magic ?? 0) +
+      sub.magic,
+    defense:
+      base.defense +
+      b.talents.vitality * 2 +
+      (bonus.defense ?? 0) +
+      sub.defense,
+    speed: base.speed + b.talents.haste * 3 + (bonus.speed ?? 0) + sub.speed,
+    subClassId: b.subClassId,
+    skillRank: b.skillRank,
     bp: 2,
     guarding: false,
     broken: 0,
@@ -301,6 +305,14 @@ export function canAct(
 ): string | null {
   const a = activeFighter(b);
   if (b.phase !== "ready" || !a || a.hp <= 0) return "การต่อสู้จบแล้ว";
+  if (action === "secondary" && (!a.subClassId || a.side !== "party"))
+    return "ยังไม่ได้เลือกอาชีพเสริม";
+  if (
+    action === "secondary" &&
+    a.subClassId &&
+    a.mp < CLASSES[a.subClassId].cost
+  )
+    return "MP ไม่พอสำหรับทักษะอาชีพเสริม";
   if (boost && a.bp < 2) return "ต้องการ 2 BP เพื่อบูสต์";
   if (
     action === "skill" &&
@@ -348,7 +360,10 @@ export function performAction(
 ): CombatEvent[] {
   boost =
     boost &&
-    (action === "attack" || action === "skill" || action === "restore");
+    (action === "attack" ||
+      action === "skill" ||
+      action === "secondary" ||
+      action === "restore");
   if (canAct(b, action, boost)) return [];
   const a = activeFighter(b)!;
   const events: CombatEvent[] = [];
@@ -390,28 +405,27 @@ export function performAction(
     });
     b.log.push(`${a.name} ฟื้นฟู ${ally.name} +${amount} HP`);
   } else {
-    const cls = a.classId as ClassId;
-    const skill = action === "skill" && a.side === "party";
-    if (skill) a.mp -= CLASSES[cls].cost;
+    const cls = (action === "secondary" ? a.subClassId : a.classId) as ClassId;
+    const skill =
+      (action === "skill" || action === "secondary") && a.side === "party";
+    const definition = skill ? CLASSES[cls] : null;
+    if (definition) a.mp -= definition.cost;
     const victims = skill && cls === "arcanist" ? targets : [target];
     for (const victim of victims) {
-      const magic = skill && cls === "arcanist",
-        factor = skill
-          ? cls === "arcanist"
-            ? targets.length === 1
-              ? 1.8
-              : 1.35
-            : 1.8
-          : 1;
+      let factor = definition?.factor ?? 1;
+      if (skill)
+        factor *= action === "secondary" ? 0.8 : 1 + (a.skillRank ?? 0) * 0.12;
+      if (definition?.effect === "fury")
+        factor *= 1 + (1 - a.hp / a.maxHp) * 0.6;
       const amount = damageAmount(
         a,
         victim,
         multiplier * factor,
-        magic,
-        skill && cls === "ranger",
+        definition?.magic ?? false,
+        definition?.effect === "pierce" || definition?.effect === "drain",
       );
       victim.hp = Math.max(0, victim.hp - amount);
-      if (skill && cls === "warden") victim.broken = 3;
+      if (definition?.effect === "break") victim.broken = 3;
       events.push({
         type: "damage",
         actor: a.id,
@@ -419,6 +433,22 @@ export function performAction(
         amount,
         element: skill ? cls : boost ? "boost" : "physical",
       });
+      if (definition?.effect === "drain" || definition?.effect === "smite") {
+        const healing = Math.min(
+          a.maxHp - a.hp,
+          definition.effect === "drain" ? Math.round(amount * 0.25) : 35,
+        );
+        if (healing > 0) {
+          a.hp += healing;
+          events.push({
+            type: "heal",
+            actor: a.id,
+            target: a.id,
+            amount: healing,
+            element: "heal",
+          });
+        }
+      }
     }
     b.log.push(
       `${a.name} ใช้ ${skill ? CLASSES[cls].skill : boost ? "Boosted Strike" : "Attack"}${victims.length === 1 ? ` → ${target.name}` : ""}`,
@@ -475,7 +505,7 @@ export function readTactics(
       version: number;
     };
     if (
-      ![2, 3].includes(s.version) ||
+      ![2, 3, 4].includes(s.version) ||
       !Number.isInteger(s.level) ||
       s.level < 1 ||
       s.level > 100 ||
@@ -514,12 +544,48 @@ export function readTactics(
         usedPoints(b) > totalPoints(s)
       )
         return fresh;
+      if (
+        s.version === 4 &&
+        (!(b.raceId === null || raceById(b.raceId)) ||
+          !(
+            b.subClassId === null ||
+            (Object.hasOwn(CLASSES, b.subClassId) &&
+              b.subClassId !== b.classId &&
+              s.level >= SUBCLASS_LEVEL)
+          ) ||
+          !Number.isInteger(b.skillRank) ||
+          b.skillRank < 0 ||
+          b.skillRank > MAX_SKILL_RANK ||
+          b.skillRank > totalSkillPoints(s))
+      )
+        return fresh;
       b.name = cleanName(b.name);
     }
+    if (
+      s.version === 4 &&
+      (typeof s.reducedMotion !== "boolean" ||
+        typeof s.created !== "boolean" ||
+        !Number.isInteger(s.raceRolls) ||
+        s.raceRolls < 0 ||
+        s.raceRolls > 3 ||
+        (s.created && !s.builds[0].raceId))
+    )
+      return fresh;
     return {
       ...s,
-      version: 3,
-      builds: [{ ...s.builds[0], upgraded: s.builds.some((b) => b.upgraded) }],
+      version: 4,
+      created: s.version === 4 ? s.created : true,
+      reducedMotion: s.version === 4 ? s.reducedMotion : false,
+      raceRolls: s.version === 4 ? s.raceRolls : 3,
+      builds: [
+        {
+          ...s.builds[0],
+          upgraded: s.builds.some((b) => b.upgraded),
+          raceId: s.version === 4 ? s.builds[0].raceId : "human",
+          subClassId: s.version === 4 ? s.builds[0].subClassId : null,
+          skillRank: s.version === 4 ? s.builds[0].skillRank : 0,
+        },
+      ],
     };
   } catch {
     return fresh;
@@ -541,4 +607,53 @@ export function cleanName(value: unknown): string {
 }
 export function renameHero(save: TacticsSave, name: string): void {
   save.builds[0].name = cleanName(name);
+}
+
+export const totalSkillPoints = (s: Pick<TacticsSave, "level">) =>
+  Math.min(MAX_SKILL_RANK, 1 + Math.floor((s.level - 1) / 2));
+export const skillPointsLeft = (s: TacticsSave) =>
+  totalSkillPoints(s) - s.builds[0].skillRank;
+export function upgradeSkill(s: TacticsSave): boolean {
+  if (skillPointsLeft(s) <= 0 || s.builds[0].skillRank >= MAX_SKILL_RANK)
+    return false;
+  s.builds[0].skillRank++;
+  return true;
+}
+export function switchSubclass(
+  s: TacticsSave,
+  classId: ClassId | null,
+): boolean {
+  const b = s.builds[0];
+  if (
+    s.level < SUBCLASS_LEVEL ||
+    classId === b.classId ||
+    (classId !== null && !Object.hasOwn(CLASSES, classId))
+  )
+    return false;
+  b.subClassId = classId;
+  return true;
+}
+/** Spend exactly one free roll, or the disclosed gold cost, before sampling. */
+export function rollRace(
+  s: TacticsSave,
+  random: () => number = Math.random,
+): ReturnType<typeof sampleRace> | null {
+  if (s.raceRolls <= 0 && s.gold < RACE_REROLL_COST) return null;
+  if (s.raceRolls > 0) s.raceRolls--;
+  else s.gold -= RACE_REROLL_COST;
+  const race = sampleRace(random);
+  s.builds[0].raceId = race.id;
+  return race;
+}
+export function createCharacter(
+  s: TacticsSave,
+  name: string,
+  classId: ClassId,
+): boolean {
+  if (s.created || !s.builds[0].raceId || !Object.hasOwn(CLASSES, classId))
+    return false;
+  s.builds[0].name = cleanName(name);
+  s.builds[0].classId = classId;
+  s.created = true;
+  return true;
 }

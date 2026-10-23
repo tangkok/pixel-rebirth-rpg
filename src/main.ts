@@ -5,6 +5,14 @@ import "@fontsource-variable/cinzel";
 import "@fontsource/noto-sans-thai/400.css";
 import "@fontsource/noto-sans-thai/600.css";
 import "./style.css";
+import "./expansion.css";
+import {
+  creationPanel,
+  racePanel,
+  subclassPanel,
+  abilityPanel,
+} from "./characterPanel";
+import { raceById, RARITIES } from "./game/lineage";
 import { icon } from "./icons";
 import { fighterArt, portraitArt } from "./game/battleArt";
 import { BattleScene } from "./game/BattleScene";
@@ -30,6 +38,11 @@ import {
   switchClass,
   TACTICS_KEY,
   PARTY_KEY,
+  SOLO_KEY,
+  rollRace,
+  createCharacter,
+  switchSubclass,
+  upgradeSkill,
   renameHero,
   upgradeWeapon,
   type ActionId,
@@ -50,7 +63,7 @@ function read(key: string) {
   }
 }
 const save = readTactics(
-  read(TACTICS_KEY) ?? read(PARTY_KEY),
+  read(TACTICS_KEY) ?? read(SOLO_KEY) ?? read(PARTY_KEY),
   read("pixel-rebirth-save-v1"),
 );
 const portraits = Object.fromEntries(
@@ -74,6 +87,9 @@ let battle: Battle = beginBattle(save),
   skillOpen = false;
 let nextTimer: ReturnType<typeof setTimeout> | undefined;
 let selectedBuild = "ash";
+let activePanel = "";
+let creationName =
+  save.builds[0].name === "ผู้เดินทาง" ? "" : save.builds[0].name;
 let audio: AudioContext | undefined;
 let reward: { gold: number; xp: number; leveled: boolean } | null = null;
 
@@ -177,6 +193,7 @@ const scene = new BattleScene(
         "2.5D fantasy turn-based battle arena",
       );
       render();
+      if (!save.created) showPanel("create");
       schedule();
     },
     select: (id) => {
@@ -186,6 +203,9 @@ const scene = new BattleScene(
   },
   initialRender.density,
 );
+scene.reducedMotion =
+  save.reducedMotion ||
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
@@ -224,6 +244,7 @@ window.addEventListener("resize", () => {
 function isPlayerTurn() {
   return (
     ready &&
+    save.created &&
     !busy &&
     !paused &&
     !dialog.open &&
@@ -264,7 +285,7 @@ function render() {
     .filter((a) => a.side === "party")
     .map(
       (a) =>
-        `<button class="party-card ${actor?.id === a.id ? "active" : ""} ${a.hp <= 0 ? "fallen" : ""}" data-build="${a.id}" aria-label="Build ${a.name}"><div class="hero-portrait"><img class="pixel-art" src="${portraits[a.classId]}" alt=""/><span>${CLASSES[a.classId as ClassId].role[0]}</span></div><div class="hero-card-main"><div class="hero-card-name"><strong>${a.name}</strong><span>LV ${save.level}</span></div><span class="hero-class">${CLASSES[a.classId as ClassId].name}</span><div class="hero-meter"><span>HP</span><div><i style="width:${(a.hp / a.maxHp) * 100}%"></i></div><b>${a.hp}<small>/${a.maxHp}</small></b></div><div class="hero-meter mp"><span>MP</span><div><i style="width:${(a.mp / a.maxMp) * 100}%"></i></div><b>${a.mp}<small>/${a.maxMp}</small></b></div><div class="hero-xp"><span>XP</span><div><i style="width:${(save.xp / requiredXp(save)) * 100}%"></i></div><b>${save.xp} / ${requiredXp(save)}</b></div><div class="bp-row"><span>BP</span>${[1, 2, 3].map((n) => `<i class="${a.bp >= n ? "filled" : ""}"></i>`).join("")}${a.guarding ? "<em>GUARD</em>" : a.hp <= 0 ? "<em>DOWN</em>" : ""}</div></div></button>`,
+        `<button class="party-card ${actor?.id === a.id ? "active" : ""} ${a.hp <= 0 ? "fallen" : ""}" data-build="${a.id}" aria-label="Build ${a.name}"><div class="hero-portrait"><img class="pixel-art" src="${portraits[a.classId]}" alt=""/><span>${CLASSES[a.classId as ClassId].role[0]}</span></div><div class="hero-card-main"><div class="hero-card-name"><strong>${a.name}</strong><span>LV ${save.level}</span></div><span class="hero-class">${CLASSES[a.classId as ClassId].name}<span class="hud-race"> · ${raceById(save.builds[0].raceId)?.name ?? ""}</span></span><div class="hero-meter"><span>HP</span><div><i style="width:${(a.hp / a.maxHp) * 100}%"></i></div><b>${a.hp}<small>/${a.maxHp}</small></b></div><div class="hero-meter mp"><span>MP</span><div><i style="width:${(a.mp / a.maxMp) * 100}%"></i></div><b>${a.mp}<small>/${a.maxMp}</small></b></div><div class="hero-xp"><span>XP</span><div><i style="width:${(save.xp / requiredXp(save)) * 100}%"></i></div><b>${save.xp} / ${requiredXp(save)}</b></div><div class="bp-row"><span>BP</span>${[1, 2, 3].map((n) => `<i class="${a.bp >= n ? "filled" : ""}"></i>`).join("")}${a.guarding ? "<em>GUARD</em>" : a.hp <= 0 ? "<em>DOWN</em>" : ""}</div></div></button>`,
     )
     .join("");
   document.querySelectorAll<HTMLElement>("[data-build]").forEach(
@@ -314,9 +335,12 @@ function render() {
     battle.log.filter((l) => l !== "REWARDS_CLAIMED").at(-1) ?? "";
   $("#skill-menu").hidden = !skillOpen || !player;
   $("#skill-toggle").setAttribute("aria-expanded", String(skillOpen && player));
-  if (actor?.side === "party")
+  if (actor?.side === "party") {
+    const cls = CLASSES[actor.classId as ClassId];
+    const sub = actor.subClassId ? CLASSES[actor.subClassId] : null;
     $("#skill-menu").innerHTML =
-      `<button data-skill="skill" ${actor.mp < CLASSES[actor.classId as ClassId].cost ? "disabled" : ""}><span>${icon("spark")}<b>${CLASSES[actor.classId as ClassId].skill}</b><small>${actor.classId === "arcanist" ? "โจมตีเวทศัตรูทั้งหมด" : actor.classId === "warden" ? "โจมตีหนักและทลายเกราะ" : "ลูกศรทะลุเกราะ"}</small></span><em>${CLASSES[actor.classId as ClassId].cost} MP</em></button><button data-skill="restore" ${actor.mp < 16 ? "disabled" : ""}><span>${icon("heart")}<b>Starlight Mend</b><small>ฟื้นฟู HP ให้ตัวคุณเอง</small></span><em>16 MP</em></button>`;
+      `<button data-skill="skill" ${actor.mp < cls.cost ? "disabled" : ""}><span>${icon("spark")}<b>${cls.skill} <small>R${(actor.skillRank ?? 0) + 1}</small></b><small>${cls.skillHint}</small></span><em>${cls.cost} MP</em></button>${sub ? `<button data-skill="secondary" ${actor.mp < sub.cost ? "disabled" : ""}><span>${icon("book")}<b>${sub.skill}</b><small>อาชีพเสริม · ${sub.skillHint}</small></span><em>${sub.cost} MP</em></button>` : ""}<button data-skill="restore" ${actor.mp < 16 ? "disabled" : ""}><span>${icon("heart")}<b>Starlight Mend</b><small>ฟื้นฟู HP ให้ตัวคุณเอง</small></span><em>16 MP</em></button>`;
+  }
   document
     .querySelectorAll<HTMLElement>("[data-skill]")
     .forEach(
@@ -328,7 +352,14 @@ function render() {
 }
 function schedule() {
   clearTimeout(nextTimer);
-  if (!ready || busy || paused || dialog.open || battle.phase !== "ready")
+  if (
+    !ready ||
+    !save.created ||
+    busy ||
+    paused ||
+    dialog.open ||
+    battle.phase !== "ready"
+  )
     return;
   const actor = activeFighter(battle);
   if (actor?.side === "enemy")
@@ -337,7 +368,14 @@ function schedule() {
     nextTimer = setTimeout(() => void act("attack"), fast ? 180 : 650);
 }
 async function act(action: ActionId, enemy = false) {
-  if (!ready || busy || paused || dialog.open || battle.phase !== "ready")
+  if (
+    !ready ||
+    !save.created ||
+    busy ||
+    paused ||
+    dialog.open ||
+    battle.phase !== "ready"
+  )
     return;
   const actor = activeFighter(battle);
   if (!actor || enemy !== (actor.side === "enemy")) return;
@@ -353,15 +391,17 @@ async function act(action: ActionId, enemy = false) {
     ? `${actor.name} · Attack`
     : action === "skill"
       ? CLASSES[actor.classId as ClassId].skill
-      : action === "restore"
-        ? "Starlight Mend"
-        : action === "guard"
-          ? "Defensive Stance"
-          : action === "item"
-            ? "Healing Potion"
-            : boost
-              ? "Boosted Strike"
-              : "Attack";
+      : action === "secondary"
+        ? CLASSES[actor.subClassId!].skill
+        : action === "restore"
+          ? "Starlight Mend"
+          : action === "guard"
+            ? "Defensive Stance"
+            : action === "item"
+              ? "Healing Potion"
+              : boost
+                ? "Boosted Strike"
+                : "Attack";
   const events: CombatEvent[] = enemy
     ? enemyAction(battle)
     : performAction(
@@ -379,7 +419,7 @@ async function act(action: ActionId, enemy = false) {
   sound(
     action === "item" || action === "restore"
       ? "heal"
-      : action === "skill"
+      : action === "skill" || action === "secondary"
         ? "magic"
         : "attack",
   );
@@ -435,9 +475,14 @@ function cycleTarget(dir: number) {
   render();
 }
 function showPanel(key: string) {
+  if (!save.created) key = "create";
+  activePanel = key;
+  $("#close-panel").hidden = key === "create";
+  dialog.classList.toggle("character-creation", key === "create");
   clearTimeout(nextTimer);
   skillOpen = false;
-  let html = "";
+  let html =
+    key === "create" ? creationPanel(save, creationName, portraits) : "";
   if (key === "party") {
     const b = save.builds.find((b) => b.id === selectedBuild) ?? save.builds[0],
       a = stats(b, save.level),
@@ -465,19 +510,19 @@ function showPanel(key: string) {
       )
       .join(
         "",
-      )}</div></div></div><div class="equipment-row"><span class="equipment-icon">${icon(b.classId === "arcanist" ? "spark" : "sword")}</span><div><span class="eyebrow">EQUIPPED WEAPON</span><strong>${b.upgraded ? cls.upgrade : cls.weapon}</strong><small>${b.upgraded ? "อัปเกรดแล้ว · ATK +12 / MAG +10" : "อัปเกรดเพื่อเพิ่ม ATK +12 / MAG +10"}</small></div><button class="button secondary" id="upgrade-weapon" ${b.upgraded || save.gold < 100 ? "disabled" : ""}>${b.upgraded ? "อัปเกรดแล้ว" : "อัปเกรด · 100 G"}</button></div><div class="build-bottom"><p>การปรับบิลด์จะมีผลเมื่อเริ่มการต่อสู้ใหม่ คืนแต้มได้ฟรี</p><button class="button primary" id="apply-build">นำบิลด์ลงสนาม ${icon("arrow")}</button></div>`;
+      )}</div></div></div><div class="equipment-row"><span class="equipment-icon">${icon(b.classId === "arcanist" ? "spark" : "sword")}</span><div><span class="eyebrow">EQUIPPED WEAPON</span><strong>${b.upgraded ? cls.upgrade : cls.weapon}</strong><small>${b.upgraded ? "อัปเกรดแล้ว · ATK +12 / MAG +10" : "อัปเกรดเพื่อเพิ่ม ATK +12 / MAG +10"}</small></div><button class="button secondary" id="upgrade-weapon" ${b.upgraded || save.gold < 100 ? "disabled" : ""}>${b.upgraded ? "อัปเกรดแล้ว" : "อัปเกรด · 100 G"}</button></div>${abilityPanel(save)}${racePanel(save)}${subclassPanel(save)}<div class="build-bottom"><p>การปรับบิลด์จะมีผลเมื่อเริ่มการต่อสู้ใหม่ คืนแต้มได้ฟรี</p><button class="button primary" id="apply-build">นำบิลด์ลงสนาม ${icon("arrow")}</button></div>`;
   }
   if (key === "adventure")
     html = `<div class="dialog-title"><span class="eyebrow">A WORLD WAITING TO BE REMEMBERED</span><h2>Choose your chapter<span>.</span></h2><p>ฟื้นแสงแห่งผลึก เดินทางผ่าน 3 บท และเผชิญราชันแห่งคราส</p></div><div class="expedition-grid">${STAGES.map((s, i) => `<button class="expedition-card stage-${i} ${i > save.unlocked ? "locked" : ""}" data-stage="${i}" ${i > save.unlocked ? "disabled" : ""}><span class="expedition-number">0${i + 1}</span><div><span class="eyebrow">${save.cleared.includes(i) ? "COMPLETED" : i > save.unlocked ? "LOCKED" : "READY TO EXPLORE"}</span><h3>${s.name}</h3><p>${s.thai}</p><small>${s.description}</small><strong>${s.reward} G <i>·</i> ${s.xp} XP ${icon(i > save.unlocked ? "settings" : "arrow")}</strong></div></button>`).join("")}</div><p class="dialog-note">เลือกด่านที่ปลดล็อกเพื่อเริ่มการต่อสู้ใหม่ เล่นซ้ำเพื่อเก็บเลเวลและเงินได้</p>`;
   if (key === "codex" || key === "help")
-    html = `<div class="dialog-title"><span class="eyebrow">THE TRAVELER'S CODEX</span><h2>A little strategy. A lasting legend<span>.</span></h2><p>ทุกคำสั่งสร้างความแตกต่าง — ค่อย ๆ เลือกได้ ไม่มีเวลาจำกัด</p></div><div class="codex-grid"><article>${icon("compass")}<h3>ลำดับเทิร์น</h3><p>ตัวละครที่มี SPD สูงจะได้ลงมือก่อน ดูลำดับจากแถบด้านบน ศัตรูจะโจมตีเมื่อถึงเทิร์นของมัน</p></article><article>${icon("bolt")}<h3>Boost · 2 BP</h3><p>แตะ BOOST ก่อนเลือกคำสั่งเพื่อเพิ่มพลัง 65% ทุกคำสั่งเพิ่ม BP 1 แต้ม การป้องกันเพิ่มได้อีก 1 แต้ม สูงสุด 3</p></article><article>${icon("sword")}<h3>บิลด์และอาชีพ</h3><p>Dawn Warden ทลายเกราะ · Starweaver ใช้เวทดวงดาว · Veil Ranger ยิงทะลุเกราะ ปรับอาชีพและแต้มได้ในตัวละครของฉัน</p></article><article>${icon("heart")}<h3>ป้องกันและฟื้นฟู</h3><p>Guard ลดความเสียหาย 55% จนถึงเทิร์นถัดไปพร้อมคืน 8 MP ยาฟื้น 90 HP และ Starlight Mend ฟื้นฟู HP ให้ตัวคุณเอง ใช้ได้กับตัวคุณเอง</p></article></div><div class="help-keys"><span><kbd>1</kbd> โจมตี</span><span><kbd>2</kbd> ทักษะ</span><span><kbd>3</kbd> ป้องกัน</span><span><kbd>4</kbd> ยา</span><span><kbd>B</kbd> บูสต์</span></div><p class="dialog-note">บนโทรศัพท์แตะคำสั่งได้โดยตรง แตะศัตรูหรือใช้ลูกศร TARGET เพื่อเลือกเป้าหมาย แตะการ์ดตัวละครของคุณเพื่อจัดบิลด์ เกมเซฟอัตโนมัติในเบราว์เซอร์นี้</p>`;
+    html = `<div class="dialog-title"><span class="eyebrow">THE TRAVELER'S CODEX</span><h2>A little strategy. A lasting legend<span>.</span></h2><p>ทุกคำสั่งสร้างความแตกต่าง — ค่อย ๆ เลือกได้ ไม่มีเวลาจำกัด</p></div><div class="codex-grid"><article>${icon("compass")}<h3>ลำดับเทิร์น</h3><p>ตัวละครที่มี SPD สูงจะได้ลงมือก่อน ดูลำดับจากแถบด้านบน ศัตรูจะโจมตีเมื่อถึงเทิร์นของมัน</p></article><article>${icon("bolt")}<h3>Boost · 2 BP</h3><p>แตะ BOOST ก่อนเลือกคำสั่งเพื่อเพิ่มพลัง 65% ทุกคำสั่งเพิ่ม BP 1 แต้ม การป้องกันเพิ่มได้อีก 1 แต้ม สูงสุด 3</p></article><article>${icon("sword")}<h3>บิลด์และอาชีพ</h3><p>เลือก 6 อาชีพหลัก ผสมอาชีพเสริมเมื่อ LV 2 เผ่า 15 แบบให้โบนัสต่างกัน เพิ่มค่าสถานะด้วยแต้ม และใช้ AP เพิ่มพลังทักษะในตัวละครของฉัน</p></article><article>${icon("heart")}<h3>ป้องกันและฟื้นฟู</h3><p>Guard ลดความเสียหาย 55% จนถึงเทิร์นถัดไปพร้อมคืน 8 MP ยาฟื้น 90 HP และ Starlight Mend ฟื้นฟู HP ให้ตัวคุณเอง ใช้ได้กับตัวคุณเอง</p></article></div><div class="help-keys"><span><kbd>1</kbd> โจมตี</span><span><kbd>2</kbd> ทักษะ</span><span><kbd>3</kbd> ป้องกัน</span><span><kbd>4</kbd> ยา</span><span><kbd>B</kbd> บูสต์</span></div><p class="dialog-note">บนโทรศัพท์แตะคำสั่งได้โดยตรง แตะศัตรูหรือใช้ลูกศร TARGET เพื่อเลือกเป้าหมาย แตะการ์ดตัวละครของคุณเพื่อจัดบิลด์ เกมเซฟอัตโนมัติในเบราว์เซอร์นี้</p>`;
   if (key === "log")
     html = `<div class="dialog-title"><span class="eyebrow">EVERY MOVE TELLS A STORY</span><h2>Battle chronicle<span>.</span></h2></div><div class="chronicle">${battle.log
       .filter((l) => l !== "REWARDS_CLAIMED")
       .map((l) => `<p>${icon("spark")}${l}</p>`)
       .join("")}</div>`;
   if (key === "settings")
-    html = `<div class="dialog-title"><span class="eyebrow">MAKE THE JOURNEY YOURS</span><h2>A moment of quiet<span>.</span></h2></div><div class="setting-row"><div><h3>เสียงเกม</h3><p>เสียงการโจมตี เวทมนตร์ และชัยชนะ</p></div><button class="toggle ${save.sound ? "on" : ""}" id="settings-sound" aria-label="Toggle game sound" aria-pressed="${save.sound}"><i></i></button></div><div class="setting-row"><div><h3>การบันทึก</h3><p>${storageAvailable ? "เซฟอัตโนมัติในเบราว์เซอร์นี้" : "เบราว์เซอร์ไม่อนุญาตให้เซฟ เล่นได้ในเซสชันนี้"}</p></div><span class="tag">${storageAvailable ? "AUTO SAVE" : "SESSION ONLY"}</span></div><div class="setting-row"><div><h3>เสบียงการเดินทาง</h3><p>ยาฟื้นฟู 90 HP · มี ${save.potions} ขวด</p></div><button class="button secondary" id="buy-potion" ${save.gold < 25 ? "disabled" : ""}>ซื้อยา · 25 G</button></div><div class="setting-row"><div><h3>เริ่มตำนานใหม่</h3><p>ล้างเลเวล เงิน บิลด์ และความคืบหน้าตัวละครคนเดียว</p></div><button class="button danger" id="reset-save">ล้างเซฟ</button></div><p class="dialog-note">Pixel Rebirth v0.3 · Original HD·2D turn-based RPG prototype. ตัวละครและศัตรูใช้ภาพ HD ต้นฉบับ ฉากจัดองค์ประกอบแบบหลายชั้นและเรนเดอร์ตามความละเอียดจอ เซฟเวอร์ชันปาร์ตี้เดิมยังอยู่แยกต่างหาก</p>`;
+    html = `<div class="dialog-title"><span class="eyebrow">MAKE THE JOURNEY YOURS</span><h2>A moment of quiet<span>.</span></h2></div><div class="setting-row"><div><h3>เสียงเกม</h3><p>เสียงการโจมตี เวทมนตร์ และชัยชนะ</p></div><button class="toggle ${save.sound ? "on" : ""}" id="settings-sound" aria-label="Toggle game sound" aria-pressed="${save.sound}"><i></i></button></div><div class="setting-row"><div><h3>ลดการเคลื่อนไหวและแสง</h3><p>ลดการสั่นกล้อง แสงวาบ และอนุภาค</p></div><button class="toggle ${scene.reducedMotion ? "on" : ""}" id="settings-motion" aria-label="Reduce motion" aria-pressed="${scene.reducedMotion}"><i></i></button></div><div class="setting-row"><div><h3>การบันทึก</h3><p>${storageAvailable ? "เซฟอัตโนมัติในเบราว์เซอร์นี้" : "เบราว์เซอร์ไม่อนุญาตให้เซฟ เล่นได้ในเซสชันนี้"}</p></div><span class="tag">${storageAvailable ? "AUTO SAVE" : "SESSION ONLY"}</span></div><div class="setting-row"><div><h3>เสบียงการเดินทาง</h3><p>ยาฟื้นฟู 90 HP · มี ${save.potions} ขวด</p></div><button class="button secondary" id="buy-potion" ${save.gold < 25 ? "disabled" : ""}>ซื้อยา · 25 G</button></div><div class="setting-row"><div><h3>เริ่มตำนานใหม่</h3><p>ล้างเลเวล เงิน บิลด์ และความคืบหน้าตัวละครคนเดียว</p></div><button class="button danger" id="reset-save">ล้างเซฟ</button></div><p class="dialog-note">Pixel Rebirth v0.4 · Original HD·2D turn-based RPG prototype. ตัวละครและศัตรูใช้ภาพ HD ต้นฉบับ ฉากจัดองค์ประกอบแบบหลายชั้นและเรนเดอร์ตามความละเอียดจอ เซฟเวอร์ชันปาร์ตี้เดิมยังอยู่แยกต่างหาก</p>`;
   $("#panel-content").innerHTML = html;
   if (!dialog.open) dialog.showModal();
   render();
@@ -509,6 +554,57 @@ function showPanel(key: string) {
     .forEach(
       (el) => (el.onclick = () => startBattle(Number(el.dataset.stage))),
     );
+  $("#create-name")?.addEventListener("input", (e) => {
+    creationName = (e.target as HTMLInputElement).value;
+  });
+  document.querySelectorAll<HTMLElement>("[data-create-class]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        switchClass(save, "ash", el.dataset.createClass as ClassId);
+        persist();
+        showPanel("create");
+      }),
+  );
+  $("#character-create-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = ($("#create-name") as HTMLInputElement).value;
+    if (!createCharacter(save, name, save.builds[0].classId)) return;
+    persist();
+    startBattle(0);
+    toast("ตำนานของคุณเริ่มต้นแล้ว");
+  });
+  $("#roll-race")?.addEventListener("click", () => {
+    const race = rollRace(save);
+    if (race) {
+      persist();
+      showPanel(activePanel);
+      sound("magic");
+      toast(`${race.name} · ${RARITIES[race.rarity].name}`);
+    }
+  });
+  $("#upgrade-skill")?.addEventListener("click", () => {
+    if (upgradeSkill(save)) {
+      persist();
+      showPanel("party");
+      toast("พลังทักษะเพิ่มขึ้น 12%");
+    }
+  });
+  document.querySelectorAll<HTMLElement>("[data-subclass]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        if (
+          switchSubclass(
+            save,
+            el.dataset.subclass === "none"
+              ? null
+              : (el.dataset.subclass as ClassId),
+          )
+        ) {
+          persist();
+          showPanel("party");
+        }
+      }),
+  );
   $("#hero-name-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const input = $("#hero-name-input") as HTMLInputElement;
@@ -537,6 +633,12 @@ function showPanel(key: string) {
     toggleSound();
     showPanel("settings");
   });
+  $("#settings-motion")?.addEventListener("click", () => {
+    save.reducedMotion = !scene.reducedMotion;
+    scene.reducedMotion = save.reducedMotion;
+    persist();
+    showPanel("settings");
+  });
   $("#buy-potion")?.addEventListener("click", () => {
     if (buyPotions(save)) {
       battle.potions++;
@@ -553,6 +655,8 @@ function showPanel(key: string) {
       Object.assign(save, freshTactics());
       persist();
       startBattle(0);
+      creationName = "";
+      showPanel("create");
     };
   });
 }
@@ -563,13 +667,18 @@ function toggleSound() {
   persist();
   if (save.sound) sound("heal");
 }
-$("#close-panel").onclick = () => dialog.close();
+$("#close-panel").onclick = () => {
+  if (save.created) dialog.close();
+};
+dialog.addEventListener("cancel", (e) => {
+  if (!save.created) e.preventDefault();
+});
 dialog.addEventListener("close", () => {
   render();
   schedule();
 });
 dialog.addEventListener("click", (e) => {
-  if (e.target === dialog) {
+  if (e.target === dialog && save.created) {
     const r = dialog.getBoundingClientRect();
     if (
       e.clientX < r.left ||
@@ -616,7 +725,7 @@ $(".sound-btn").onclick = toggleSound;
 $("#fullscreen").onclick = async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
-    else await $(".battle-shell").requestFullscreen();
+    else await $("#app").requestFullscreen();
   } catch {
     toast("เบราว์เซอร์นี้ไม่รองรับโหมดเต็มจอ แต่เล่นต่อได้ตามปกติ");
   }

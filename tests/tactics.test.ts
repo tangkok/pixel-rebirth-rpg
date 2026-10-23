@@ -260,7 +260,7 @@ describe("progress and migration", () => {
     };
     const raw = JSON.stringify(old),
       migrated = readTactics(raw);
-    expect(migrated.version).toBe(3);
+    expect(migrated.version).toBe(4);
     expect(migrated.builds).toHaveLength(1);
     expect(migrated.builds[0].upgraded).toBe(true);
     expect(migrated.gold).toBe(225);
@@ -289,7 +289,14 @@ describe("progress and migration", () => {
   ])("recovers from invalid save %s", (raw) => {
     expect(readTactics(raw)).toEqual(freshTactics());
   });
-  it.each(["warden", "arcanist", "ranger"] as ClassId[])(
+  it.each([
+    "warden",
+    "arcanist",
+    "ranger",
+    "assassin",
+    "paladin",
+    "berserker",
+  ] as ClassId[])(
     "%s can clear the full campaign alone with earned resources",
     (cls) => {
       const s = freshTactics();

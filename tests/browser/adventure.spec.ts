@@ -1,6 +1,35 @@
 import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (
+      !localStorage.getItem("pixel-rebirth-lineage-v4") &&
+      !localStorage.getItem("pixel-rebirth-solo-v3")
+    ) {
+      localStorage.setItem(
+        "pixel-rebirth-solo-v3",
+        JSON.stringify({
+          version: 3,
+          level: 1,
+          xp: 0,
+          gold: 150,
+          potions: 5,
+          unlocked: 0,
+          cleared: [],
+          sound: false,
+          builds: [
+            {
+              id: "ash",
+              name: "ผู้เดินทาง",
+              classId: "warden",
+              talents: { might: 0, vitality: 0, spirit: 0, haste: 0 },
+              upgraded: false,
+            },
+          ],
+        }),
+      );
+    }
+  });
   await page.goto("/");
   await expect(page.locator("#game canvas")).toBeVisible();
   await expect(page.locator("#loading")).toHaveCount(0);
@@ -64,7 +93,7 @@ test("boosted attack, opponent response and return to your turn work", async ({
           ).hp,
       ),
     )
-    .toBeLessThan(240);
+    .toBeLessThan(252);
   await expect(
     page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
   ).toBeEnabled();
@@ -114,7 +143,7 @@ test("you can name, build and upgrade just your own character and reload it", as
           (a: any) => a.side === "party",
         ).attack,
     ),
-  ).toBe(49);
+  ).toBe(51);
   await page.reload();
   await expect(page.locator("#loading")).toHaveCount(0);
   await expect(page.locator(".hero-card-name")).toContainText("นักดาบดาว");
@@ -217,6 +246,7 @@ test("old party save is preserved and migrated without losing progression", asyn
   await page.addInitScript((old) => {
     localStorage.setItem("pixel-rebirth-tactics-v2", JSON.stringify(old));
     localStorage.removeItem("pixel-rebirth-solo-v3");
+    localStorage.removeItem("pixel-rebirth-lineage-v4");
   }, old);
   await page.reload();
   await expect(page.locator("#loading")).toHaveCount(0);
@@ -226,7 +256,7 @@ test("old party save is preserved and migrated without losing progression", asyn
   const saved = await page.evaluate(() => ({
     old: JSON.parse(localStorage.getItem("pixel-rebirth-tactics-v2")!).builds
       .length,
-    new: JSON.parse(localStorage.getItem("pixel-rebirth-solo-v3")!).builds
+    new: JSON.parse(localStorage.getItem("pixel-rebirth-lineage-v4")!).builds
       .length,
     upgrade: (window as any).__pixelRebirth.save.builds[0].upgraded,
   }));

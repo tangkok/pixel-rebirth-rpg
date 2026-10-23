@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import type { ClassId } from "./tactics";
+import { CLASS_IDS, type ClassId } from "./lineage";
 
 type Ctx = CanvasRenderingContext2D;
 const illustrated = new Map<string, HTMLCanvasElement>();
@@ -34,6 +34,7 @@ function surface(w: number, h: number, paint: (c: Ctx) => void) {
 }
 export function fighterArt(kind: string): HTMLCanvasElement {
   if (illustrated.has(kind)) return illustrated.get(kind)!;
+  if (kind.endsWith("-action")) return fighterArt(kind.replace("-action", ""));
   if (kind === "sentinel")
     return surface(96, 112, (c) => {
       shape(
@@ -438,10 +439,181 @@ function unpackHeroSheet(sheet: HTMLImageElement) {
     );
   }
 }
+/** Keep the connected hero silhouette, removing clipped fragments from adjacent cells. */
+function isolateSilhouette(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const c = canvas.getContext("2d")!,
+    image = c.getImageData(0, 0, canvas.width, canvas.height);
+  const { width: w, height: h, data } = image,
+    n = w * h,
+    labels = new Uint32Array(n),
+    queue = new Uint32Array(n);
+  let label = 0,
+    largest = 0,
+    largestSize = 0;
+  for (let i = 0; i < n; i++) {
+    if (labels[i] || data[i * 4 + 3] < 40) continue;
+    label++;
+    let head = 0,
+      tail = 1;
+    queue[0] = i;
+    labels[i] = label;
+    while (head < tail) {
+      const p = queue[head++],
+        x = p % w,
+        y = Math.floor(p / w);
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx,
+            ny = y + dy;
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          const k = ny * w + nx;
+          if (!labels[k] && data[k * 4 + 3] >= 40) {
+            labels[k] = label;
+            queue[tail++] = k;
+          }
+        }
+    }
+    if (tail > largestSize) {
+      largest = label;
+      largestSize = tail;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (labels[i] === largest) continue;
+    // Preserve a narrow antialiased edge around the retained silhouette.
+    let edge = false;
+    if (labels[i] === 0 && data[i * 4 + 3] > 0) {
+      const x = i % w,
+        y = Math.floor(i / w);
+      for (let dy = -2; dy <= 2 && !edge; dy++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx,
+            ny = y + dy;
+          if (
+            nx >= 0 &&
+            nx < w &&
+            ny >= 0 &&
+            ny < h &&
+            labels[ny * w + nx] === largest
+          ) {
+            edge = true;
+            break;
+          }
+        }
+    }
+    if (!edge) data[i * 4 + 3] = 0;
+  }
+  c.putImageData(image, 0, 0);
+  return canvas;
+}
+function unpackPoseSheet(sheet: HTMLImageElement) {
+  // Explicit atlas polygons keep neighboring weapons outside each frame.
+  // Idle and action share the same body pivot/scale: crouching does not inflate the hero.
+  const idle = [
+    {
+      cx: 145,
+      foot: 555,
+      mask: [0, 90, 280, 90, 280, 560, 0, 560],
+      face: [80, 136, 105, 110],
+    },
+    {
+      cx: 435,
+      foot: 555,
+      mask: [280, 60, 530, 60, 530, 310, 580, 400, 580, 560, 280, 560],
+      face: [351, 144, 110, 112],
+    },
+    {
+      cx: 655,
+      foot: 555,
+      mask: [530, 110, 780, 110, 780, 560, 540, 560, 540, 390, 566, 310],
+      face: [598, 139, 110, 114],
+    },
+    {
+      cx: 900,
+      foot: 555,
+      mask: [780, 120, 1030, 120, 1030, 350, 995, 430, 995, 560, 780, 560],
+      face: [821, 141, 116, 110],
+    },
+    {
+      cx: 1160,
+      foot: 555,
+      mask: [1035, 125, 1290, 125, 1290, 560, 990, 560, 990, 420, 1035, 420],
+      face: [1082, 132, 114, 120],
+    },
+    {
+      cx: 1410,
+      foot: 555,
+      mask: [1289, 110, 1536, 110, 1536, 560, 1289, 560],
+      face: [1350, 133, 108, 120],
+    },
+  ];
+  const action = [
+    {
+      cx: 140,
+      foot: 965,
+      mask: [0, 585, 290, 585, 290, 855, 325, 900, 325, 975, 0, 975],
+    },
+    {
+      cx: 430,
+      foot: 965,
+      mask: [
+        295, 575, 580, 575, 580, 795, 584, 850, 584, 976, 325, 976, 295, 850,
+      ],
+    },
+    {
+      cx: 700,
+      foot: 965,
+      mask: [555, 570, 790, 570, 790, 810, 850, 900, 850, 975, 555, 975],
+    },
+    {
+      cx: 940,
+      foot: 965,
+      mask: [800, 620, 1045, 620, 1045, 976, 850, 976, 850, 840, 800, 800],
+    },
+    { cx: 1170, foot: 965, mask: [1040, 610, 1302, 610, 1302, 976, 1040, 976] },
+    { cx: 1410, foot: 965, mask: [1303, 565, 1536, 565, 1536, 976, 1303, 976] },
+  ];
+  CLASS_IDS.forEach((id, i) => {
+    for (const [pose, f] of [
+      ["idle", idle[i]],
+      ["action", action[i]],
+    ] as const) {
+      illustrated.set(
+        pose === "idle" ? id : `${id}-action`,
+        isolateSilhouette(
+          surface(384, 576, (c) => {
+            c.imageSmoothingEnabled = true;
+            c.translate(192 - f.cx * 1.1, 576 - f.foot * 1.1);
+            c.scale(1.1, 1.1);
+            c.beginPath();
+            c.moveTo(f.mask[0], f.mask[1]);
+            for (let n = 2; n < f.mask.length; n += 2)
+              c.lineTo(f.mask[n], f.mask[n + 1]);
+            c.closePath();
+            c.clip();
+            c.drawImage(sheet, 0, 0);
+          }),
+        ),
+      );
+    }
+    const [x, y, w, h] = idle[i].face;
+    illustratedPortraits.set(
+      id,
+      surface(192, 192, (c) => {
+        c.imageSmoothingEnabled = true;
+        c.drawImage(sheet, x, y, w, h, 0, 0, 192, 192);
+      }).toDataURL(),
+    );
+  });
+}
 export function createBattleArt(scene: Phaser.Scene) {
   if (scene.textures.exists("hero-sheet"))
     unpackHeroSheet(
       scene.textures.get("hero-sheet").getSourceImage() as HTMLImageElement,
+    );
+  if (scene.textures.exists("pose-sheet"))
+    unpackPoseSheet(
+      scene.textures.get("pose-sheet").getSourceImage() as HTMLImageElement,
     );
   if (scene.textures.exists("enemy-sheet")) {
     const sheet = scene.textures
@@ -503,9 +675,8 @@ export function createBattleArt(scene: Phaser.Scene) {
       );
   }
   for (const key of [
-    "warden",
-    "arcanist",
-    "ranger",
+    ...CLASS_IDS,
+    ...CLASS_IDS.map((id) => `${id}-action`),
     "sentinel",
     "wisp",
     "thorn",
