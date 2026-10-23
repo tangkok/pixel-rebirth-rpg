@@ -2,11 +2,11 @@ import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("#loading")).toHaveCount(0);
   await expect(page.locator("#game canvas")).toBeVisible();
+  await expect(page.locator("#loading")).toHaveCount(0);
 });
 
-test("boots an original world without runtime errors and fits the screen", async ({
+test("HD-2D arena loads without errors, overflow, or unsolicited turns", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -14,233 +14,280 @@ test("boots an original world without runtime errors and fits the screen", async
   await page.reload();
   await expect(page.locator("#loading")).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "Your adventure starts here." }),
+    page.getByRole("heading", { name: "The Hollow Sanctuary", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  const world = await page.evaluate(() => {
-    const s = (window as any).__pixelRebirth.scene;
-    return {
-      trees: s.textures.exists("tree"),
-      hero: s.textures.exists("hero"),
-      enemies: s.enemies.length,
-    };
-  });
-  expect(world).toEqual({ trees: true, hero: true, enemies: 9 });
+  await expect(
+    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
+  ).toBeEnabled();
+  await page.waitForTimeout(700);
+  expect(
+    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
+  ).toBe(0);
+  expect(
+    await page.evaluate(() =>
+      (window as any).__pixelRebirth.scene.textures.exists("sanctuary"),
+    ),
+  ).toBe(true);
+  expect(
+    await page.evaluate(() =>
+      (window as any).__pixelRebirth.scene.textures.exists("hero-sheet"),
+    ),
+  ).toBe(true);
   expect(errors).toEqual([]);
 });
 
-test("keyboard movement, combat, healing and reload persistence", async ({
+test("target selection, boost, attack and turn advancement work through UI", async ({
   page,
 }) => {
-  const start = await page.evaluate(
-    () => (window as any).__pixelRebirth.scene.player.x,
-  );
-  await page.keyboard.down("d");
-  await page.waitForTimeout(350);
-  await page.keyboard.up("d");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.player.x),
-  ).toBeGreaterThan(start + 20);
-  for (let i = 0; i < 2; i++) {
-    await page.evaluate(() => {
-      const s = (window as any).__pixelRebirth.scene,
-        e = s.enemies.find((e: any) => !e.boss);
-      s.player.setPosition(e.sprite.x - 35, e.sprite.y);
-    });
-    await page.keyboard.press("Space");
-    await page.waitForTimeout(460);
-  }
+  await page.getByRole("button", { name: "Next target", exact: true }).click();
+  await expect(page.locator("#target-name")).toHaveText("Astral Wisp");
+  await page
+    .getByRole("button", { name: "Previous target", exact: true })
+    .click();
+  await expect(page.locator("#target-name")).toHaveText("Hollow Sentinel");
+  await page.locator("#boost").click();
+  await expect(page.locator("#boost")).toHaveAttribute("aria-pressed", "true");
+  await page
+    .getByRole("button", { name: "Attack / โจมตี", exact: true })
+    .click();
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__pixelRebirth.progress.kills),
+      page.evaluate(
+        () =>
+          (window as any).__pixelRebirth.battle.actors.find(
+            (a: any) => a.id === "sentinel",
+          ).hp,
+      ),
     )
-    .toBeGreaterThanOrEqual(1);
-  await expect(page.locator("[data-gold]").first()).toHaveText("8");
-  await page.evaluate(() => {
-    const r = (window as any).__pixelRebirth;
-    r.scene.player.setPosition(710, 600);
-    r.progress.hp = 30;
-  });
-  await page.keyboard.press("q");
-  await expect(page.locator("#potion-count")).toHaveText("2");
+    .toBeLessThan(155);
+  await expect(page.locator("#actor-name")).toContainText("Lyra");
+  await expect(
+    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
+  ).toBeEnabled();
   expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.hp),
-  ).toBe(95);
-  await page.waitForTimeout(400);
-  await page.reload();
-  await expect(page.locator("#loading")).toHaveCount(0);
-  await expect(page.locator("#potion-count")).toHaveText("2");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.kills),
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.id === "kael",
+        ).bp,
+    ),
   ).toBe(1);
 });
 
-test("quest rewards, chest and damage recovery work through game actions", async ({
+test("arcanist skill damages every enemy and enemy AI answers", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Attack / โจมตี", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Skills / ทักษะ", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("button", { name: "Skills / ทักษะ", exact: true })
+    .click();
+  await page.getByRole("button", { name: /Astral Rain/ }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as any).__pixelRebirth.battle.actors.filter(
+            (a: any) => a.side === "enemy" && a.hp < a.maxHp,
+          ).length,
+      ),
+    )
+    .toBe(3);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as any).__pixelRebirth.battle.actors.some(
+          (a: any) => a.side === "party" && a.hp < a.maxHp,
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
+  ).toBeEnabled();
+});
+
+test("build choices, talent limits, equipment, application and persistence", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Party & builds", exact: true })
+    .click();
+  await expect(page.locator("#panel")).toBeVisible();
+  for (let i = 0; i < 3; i++)
+    await page
+      .getByRole("button", { name: "Allocate might", exact: true })
+      .click();
+  await expect(
+    page.getByRole("button", { name: "Allocate might", exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator("#talent-points")).toHaveText("0 AVAILABLE");
+  await page
+    .getByRole("button", { name: "Class Starweaver", exact: true })
+    .click();
+  await page.locator("#upgrade-weapon").click();
+  await expect(page.locator("#upgrade-weapon")).toBeDisabled();
+  await expect(page.locator("#gold-value")).toHaveText("50");
+  await page.locator("#apply-build").click();
+  await expect(page.locator("#panel")).toBeHidden();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.id === "ash",
+        ).classId,
+    ),
+  ).toBe("arcanist");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.id === "ash",
+        ).attack,
+    ),
+  ).toBe(43);
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveCount(0);
+  await expect(page.locator("#gold-value")).toHaveText("50");
+  expect(
+    await page.evaluate(
+      () => (window as any).__pixelRebirth.save.builds[0].talents.might,
+    ),
+  ).toBe(3);
+});
+
+test("full-health potion does not spend a turn and an injured ally can be revived", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
+    .click();
+  await expect(page.locator("#toasts")).toContainText("HP เต็ม");
+  await expect(page.locator("#potion-count")).toHaveText("×5");
+  expect(
+    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
+  ).toBe(0);
+  await page.evaluate(() => {
+    (window as any).__pixelRebirth.battle.actors.find(
+      (a: any) => a.id === "ash",
+    ).hp = 0;
+  });
+  await page
+    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
+    .click();
+  await expect(page.locator("#potion-count")).toHaveText("×4");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.id === "ash",
+        ).hp,
+    ),
+  ).toBe(90);
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveCount(0);
+  await expect(page.locator("#potion-count")).toHaveText("×4");
+});
+
+test("dialogs stop turn scheduling and settings shop, sounds and reset confirmation work", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Attack / โจมตี", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Codex", exact: true }).click();
+  const cursor = await page.evaluate(
+    () => (window as any).__pixelRebirth.battle.cursor,
+  );
+  await page.waitForTimeout(900);
+  expect(
+    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
+  ).toBe(cursor);
+  await page
+    .getByRole("button", { name: "Close dialog / ปิด", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Settings / ตั้งค่า", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Toggle game sound", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Toggle game sound", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#buy-potion").click();
+  expect(
+    await page.evaluate(() => (window as any).__pixelRebirth.save.potions),
+  ).toBe(6);
+  await expect(page.locator("#gold-value")).toHaveText("125");
+  await page.locator("#reset-save").click();
+  await page.locator("#cancel-reset").click();
+  await expect(page.locator("#panel")).toContainText("A moment of quiet.");
+});
+
+test("real turns complete an encounter, reward once and unlock the next chapter", async ({
   page,
 }) => {
   await page.evaluate(() => {
     const r = (window as any).__pixelRebirth;
-    r.progress.kills = 5;
-    r.scene.player.setPosition(535, 550);
+    r.save.level = 10;
+    r.startBattle(0);
   });
-  await page.keyboard.press("e");
-  await expect(page.locator("#toasts")).toContainText("75 gold");
+  await page
+    .getByRole("button", { name: "Toggle battle speed", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Toggle auto battle", exact: true })
+    .click();
+  await expect(page.locator("#result")).toBeVisible({ timeout: 30000 });
+  await expect(page.locator("#result")).toContainText("Victory");
+  await expect(page.locator("#gold-value")).toHaveText("210");
+  await page.locator("#next-battle").click();
+  await expect(page.locator("#result")).toBeHidden();
+  await expect(
+    page.getByRole("heading", { name: "The Sunken Archive", exact: true }),
+  ).toBeVisible();
   expect(
-    await page.evaluate(
-      () => (window as any).__pixelRebirth.progress.questClaimed,
-    ),
-  ).toBe(true);
-  await page.evaluate(() =>
-    (window as any).__pixelRebirth.scene.player.setPosition(887, 480),
-  );
-  await page.keyboard.press("e");
-  await expect(page.locator("#toasts")).toContainText("A lucky find");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.gold),
-  ).toBe(105);
-  await page.keyboard.press("e");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.gold),
-  ).toBe(105);
+    await page.evaluate(() => (window as any).__pixelRebirth.save.unlocked),
+  ).toBe(1);
+});
+
+test("defeat offers a working retry and mobile commands can be tapped", async ({
+  page,
+}, info) => {
   await page.evaluate(() => {
     const r = (window as any).__pixelRebirth,
-      e = r.scene.enemies[0];
-    r.progress.hp = 1;
-    r.scene.player.setPosition(e.sprite.x, e.sprite.y);
+      b = r.battle;
+    b.actors
+      .filter((a: any) => a.side === "party")
+      .forEach((a: any) => (a.hp = a.id === "ash" ? 1 : 0));
+    b.cursor = b.queue.indexOf("wisp");
   });
-  await expect(page.locator("#toasts")).toContainText("A second chance");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.hp),
-  ).toBe(120);
-});
-
-test("dialogs pause the world and inventory, map, settings are functional", async ({
-  page,
-}, testInfo) => {
-  await page.getByRole("button", { name: "How to play" }).click();
-  await expect(page.locator("#panel")).toBeVisible();
-  const x = await page.evaluate(
-    () => (window as any).__pixelRebirth.scene.player.x,
-  );
-  await page.keyboard.down("d");
-  await page.waitForTimeout(250);
-  await page.keyboard.up("d");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.player.x),
-  ).toBe(x);
-  await page.getByRole("button", { name: "Let’s explore" }).click();
-  await page.keyboard.press("i");
-  await expect(page.locator("#panel")).toContainText("Iron sword");
-  await page.getByRole("button", { name: "Close dialog" }).click();
   await page
-    .getByRole("button", { name: "Open world map", exact: true })
+    .getByRole("button", { name: "Toggle auto battle", exact: true })
     .click();
-  await expect(page.locator("#panel")).toContainText(
-    "Somewhere worth getting lost.",
-  );
-  await page.getByRole("button", { name: "Close dialog" }).click();
-  if (testInfo.project.name === "mobile")
-    await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Toggle game sounds" }).click();
-  await expect(
-    page.getByRole("button", { name: "Toggle game sounds" }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Reset progress" }).click();
-  await page.getByRole("button", { name: "Keep adventuring" }).click();
-  await expect(page.locator("#panel")).toContainText("Make yourself at home.");
-});
-
-test("pause and resume preserve control", async ({ page }) => {
-  await page.getByRole("button", { name: "Pause game", exact: true }).click();
-  await expect(page.locator("#resume-game")).toBeVisible();
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.paused),
-  ).toBe(true);
-  await page.locator("#resume-game").click();
-  await expect(page.locator("#resume-game")).toBeHidden();
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.paused),
-  ).toBe(false);
-});
-
-test("touch direction pad moves and releases correctly", async ({
-  page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "mobile",
-    "Touch controls are shown on touch devices.",
-  );
-  const start = await page.evaluate(
-    () => (window as any).__pixelRebirth.scene.player.x,
-  );
-  const right = page.getByRole("button", { name: "Move right" });
-  await expect(right).toBeVisible();
-  const box = (await right.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.waitForTimeout(400);
-  await page.mouse.up();
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.player.x),
-  ).toBeGreaterThan(start + 25);
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.scene.held.size),
-  ).toBe(0);
-  await page.getByRole("button", { name: "Attack", exact: true }).last().tap();
-  await page.getByRole("button", { name: "Dash", exact: true }).tap();
-});
-
-test("collectibles remain collected and the boss can be defeated", async ({
-  page,
-}) => {
-  await page.evaluate(() =>
-    (window as any).__pixelRebirth.scene.player.setPosition(840, 740),
-  );
-  await expect
-    .poll(() =>
-      page.evaluate(() => (window as any).__pixelRebirth.progress.crystals),
-    )
-    .toBe(1);
-  await page.evaluate(() =>
-    (window as any).__pixelRebirth.scene.player.setPosition(887, 474),
-  );
-  await page.keyboard.press("e");
-  await expect(page.locator("#toasts")).toContainText("A lucky find");
-  await page.waitForTimeout(400);
-  await page.reload();
-  await expect(page.locator("#loading")).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () => (window as any).__pixelRebirth.progress.openedChest,
-    ),
-  ).toBe(true);
-  await page.evaluate(() =>
-    (window as any).__pixelRebirth.scene.player.setPosition(840, 740),
-  );
-  await page.waitForTimeout(120);
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.progress.crystals),
-  ).toBe(1);
-  for (let hit = 0; hit < 10; hit++) {
-    await page.evaluate(() => {
-      const s = (window as any).__pixelRebirth.scene,
-        e = s.enemies.find((e: any) => e.boss);
-      if (e) s.player.setPosition(e.sprite.x - 70, e.sprite.y);
-    });
-    await page.keyboard.press("Space");
-    await page.waitForTimeout(450);
-  }
-  expect(
-    await page.evaluate(
-      () => (window as any).__pixelRebirth.progress.bossDefeated,
-    ),
-  ).toBe(true);
-  await expect(page.locator("#toasts")).toContainText(
-    "The Grove Guardian is defeated",
-  );
+  await expect(page.locator("#result")).toBeVisible();
+  await expect(page.locator("#result")).toContainText("Rise again");
+  await page.locator("#next-battle").click();
+  await expect(page.locator("#result")).toBeHidden();
+  const attack = page.getByRole("button", {
+    name: "Attack / โจมตี",
+    exact: true,
+  });
+  await expect(attack).toBeEnabled();
+  if (info.project.name === "mobile") await attack.tap();
+  else await attack.click();
+  await expect(page.locator("#actor-name")).toContainText("Lyra");
 });

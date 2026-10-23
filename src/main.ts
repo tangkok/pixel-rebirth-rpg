@@ -1,274 +1,520 @@
 import Phaser from "phaser";
 import "@fontsource-variable/dm-sans";
 import "@fontsource-variable/space-grotesk";
-import "@fontsource/press-start-2p/latin-400.css";
+import "@fontsource-variable/cinzel";
+import "@fontsource/noto-sans-thai/400.css";
+import "@fontsource/noto-sans-thai/600.css";
 import "./style.css";
 import { icon } from "./icons";
-import { heroArt, itemArt } from "./game/art";
-import { ForestScene, WORLD } from "./game/World";
+import { fighterArt, portraitArt } from "./game/battleArt";
+import { BattleScene } from "./game/BattleScene";
 import {
-  attackPower,
-  freshProgress,
-  maxHp,
-  nextLevelXp,
-  parseSave,
-  SAVE_KEY,
-} from "./game/model";
+  activeFighter,
+  allocate,
+  awardVictory,
+  beginBattle,
+  buyPotions,
+  canAct,
+  CLASSES,
+  enemyAction,
+  freshTactics,
+  living,
+  performAction,
+  pointsLeft,
+  readTactics,
+  requiredXp,
+  respec,
+  stats,
+  STAGES,
+  switchClass,
+  TACTICS_KEY,
+  upgradeWeapon,
+  type ActionId,
+  type Battle,
+  type ClassId,
+  type CombatEvent,
+  type Talent,
+} from "./game/tactics";
 
+const $ = (s: string) => document.querySelector<HTMLElement>(s)!;
 let storageAvailable = true;
-function readSave() {
+function read(key: string) {
   try {
-    return localStorage.getItem(SAVE_KEY);
+    return localStorage.getItem(key);
   } catch {
     storageAvailable = false;
     return null;
   }
 }
-const progress = parseSave(readSave());
-const portrait = heroArt().toDataURL();
-const items = Object.fromEntries(
-  ["sword", "potion", "crystal", "coin"].map((k) => [
+const save = readTactics(read(TACTICS_KEY), read("pixel-rebirth-save-v1"));
+const portraits = Object.fromEntries(
+  Object.keys(CLASSES).map((k) => [k, portraitArt(k as ClassId)]),
+);
+const enemies = Object.fromEntries(
+  ["sentinel", "wisp", "thorn", "dragon"].map((k) => [
     k,
-    itemArt(k).toDataURL(),
+    fighterArt(k).toDataURL(),
   ]),
 );
-const item = (key: string, cls = "") =>
-  `<img class="pixel-art ${cls}" src="${items[key]}" alt="" draggable="false" />`;
-const nav = (key: string, label: string, extra = "") =>
-  `<button class="nav-item ${key === "compass" ? "active" : ""}" data-panel="${key}" ${key === "compass" ? 'aria-current="page"' : ""}>${icon(key)}<span>${label}</span>${extra || (key === "compass" ? icon("chevron", "nav-arrow") : "")}</button>`;
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-  <aside class="sidebar" aria-label="Main navigation">
-    <a class="brand" href="./" aria-label="Pixel Rebirth home"><div class="brand-mark"><i></i><b></b><em></em></div><div>PIXEL<span>REBIRTH<span class="brand-dot">.</span></span></div></a>
-    <div class="profile"><div class="portrait"><img class="pixel-art" src="${portrait}" alt="Ash, your adventurer" /></div><div><strong>Ash <span class="online-dot"></span></strong><span>Novice adventurer</span></div><span class="level-badge" data-level>LV. 1</span></div>
-    <div class="nav-label">YOUR JOURNEY</div>
-    <nav>${nav("compass", "Adventure")}${nav("person", "Character")}${nav("bag", "Inventory", '<span class="nav-count" id="inventory-count">4</span>')}${nav("map", "World map")}${nav("book", "Quest journal")}</nav>
-    <div class="sidebar-quest"><div class="small-label">${icon("flag")} ACTIVE QUEST</div><h3>A little less slime</h3><p>Help Rowan clear the forest trail.</p><div class="quest-task"><span class="quest-checkbox" id="quest-check"></span><span id="quest-task-label">Defeat forest slimes</span><b data-kills>0/5</b></div><div class="mini-track"><i id="quest-fill"></i></div><button class="text-link" data-panel="book">View quest ${icon("arrow")}</button></div>
-    <div class="sidebar-bottom"><div class="forest-note"><span class="little-stars">✦ &nbsp; · &nbsp; ✧</span><h3>Small steps.<br>Great adventures.</h3><p>There’s a whole world<br>waiting beyond the trail.</p><div class="tiny-forest"><i></i><i></i><i></i><i></i><i></i></div></div><button class="nav-item settings" data-panel="settings">${icon("settings")}<span>Settings</span><span class="version">v0.1</span></button><div class="made-with">A new beginning, one pixel at a time.</div></div>
-  </aside>
-  <button class="nav-scrim" aria-label="Close navigation"></button>
-  <div class="main-shell">
-    <header class="topbar"><div class="breadcrumbs"><button class="mobile-menu icon-btn" aria-label="Open navigation">${icon("menu")}</button><span>Play</span>${icon("chevron")}<strong>Adventure</strong></div><div class="topbar-right"><span class="save-status">${icon("cloud")}<span id="save-status">All progress saved</span></span><span class="top-divider"></span><button class="icon-btn" data-panel="help" aria-label="Help">${icon("help")}</button><button class="mini-profile" data-panel="person" aria-label="Open character"><img class="pixel-art" src="${portrait}" alt="" /></button></div></header>
-    <main>
-      <section class="page-heading"><div><div class="eyebrow"><span></span> A NEW DAY. A NEW ADVENTURE.</div><h1>Your adventure starts here<span>.</span></h1><p>A little courage. A path unknown. A story that’s yours to write.</p></div><button class="button secondary how-to" data-panel="help">${icon("play")} How to play</button></section>
-      <section class="game-card" aria-label="Pixel Rebirth game">
-        <div class="game-topline"><div class="location-heading">${icon("leaf")}<strong>Whispering Woods</strong><span class="area-level">LV. 1–5</span></div><div class="game-top-actions"><span class="live-status"><i></i> EXPLORING</span><button class="icon-btn sound-btn" aria-label="Enable sound" title="Enable sound">${icon("mute")}</button><button class="icon-btn" id="fullscreen" aria-label="Toggle fullscreen" title="Fullscreen">${icon("expand")}</button></div></div>
-        <div id="game-viewport">
-          <div id="game"></div>
-          <div class="world-vignette"></div>
-          <div class="hud-player"><div class="hud-avatar"><img class="pixel-art" src="${portrait}" alt="" /></div><div class="hud-player-info"><div><strong>Ash</strong><span data-level>LV. 1</span></div><div class="health-track"><i id="health-fill"></i></div><span class="health-value" id="health-value">100 / 100 HP</span></div></div>
-          <button class="minimap" data-panel="map" aria-label="Open world map"><svg viewBox="0 0 124 100" aria-hidden="true"><rect width="124" height="100" fill="#344c37"/><path d="M0 29h17v9h18V12h17v17h21v-9h25v18h26v48h-21v14H0Z" fill="#4f6844"/><path d="m2 56 31 3 22-8 34 7 35-5M55 0l-2 32 4 27-4 41" fill="none" stroke="#c0ac77" stroke-width="7"/><path d="m94 0-5 26 8 29-7 24 5 21" fill="none" stroke="#6ca69a" stroke-width="12"/><path d="M86 54h21" stroke="#b09a6c" stroke-width="8"/><g fill="#2a4333"><path d="m12 6 9 15H3zm15 66 9 15H18zm44-7 9 15H62zm1-58 9 15H63z"/></g><circle id="map-dot" cx="55" cy="54" r="4" fill="#f2e6ad" stroke="#354833" stroke-width="2"/></svg><span>WHISPERING WOODS ${icon("expand")}</span><b class="north">N</b></button>
-          <div class="area-toast"><span class="area-line"></span><span>THE OVERWORLD</span><strong>Whispering Woods</strong><span class="area-coords">A quiet place for a new beginning.</span></div>
-          <div class="world-tip">${icon("leaf")} Follow your curiosity.</div><div id="interaction-hint" hidden><kbd>E</kbd><span>Talk to Rowan</span></div>
-          <div class="quick-slots"><button class="quick-slot selected" id="slot-sword" aria-label="Attack"><kbd>1</kbd>${item("sword")}<span>Iron sword</span></button><button class="quick-slot" id="slot-potion" aria-label="Use healing potion"><kbd>Q</kbd>${item("potion")}<b id="potion-count">3</b><span>Healing potion</span></button><button class="quick-slot" data-panel="bag" aria-label="Open inventory"><kbd>I</kbd>${icon("bag")}<span>Inventory</span></button></div>
-          <div class="touch-controls"><div class="dpad"><button data-hold="UP" aria-label="Move up">${icon("chevron")}</button><button data-hold="LEFT" aria-label="Move left">${icon("chevron")}</button><span></span><button data-hold="RIGHT" aria-label="Move right">${icon("chevron")}</button><button data-hold="DOWN" aria-label="Move down">${icon("chevron")}</button></div><div class="touch-actions"><button id="touch-interact" aria-label="Interact">${icon("person")}<span>Talk</span></button><button id="touch-dash" aria-label="Dash">${icon("bolt")}<span>Dash</span></button><button id="touch-attack" aria-label="Attack">${icon("sword")}<span>Attack</span></button></div></div>
-          <button id="resume-game" class="resume-overlay" hidden>${icon("play")}<strong>Take a breath.</strong><span>Your adventure will be right here.</span><b>Resume adventure</b></button>
-          <div id="loading"><div class="loading-leaf">${icon("leaf")}</div><strong>A world is waking up…</strong></div>
-        </div>
-        <div class="game-footer"><div class="experience"><span class="xp-level" data-level>LV. 1</span><div><div class="xp-text"><span>Novice adventurer</span><b id="xp-value">0 / 60 XP</b></div><div class="xp-track"><i id="xp-fill"></i></div></div></div><div class="gold-balance">${item("coin")}<strong data-gold>0</strong><span>gold</span></div><button class="icon-btn" id="pause" aria-label="Pause game" title="Pause game">${icon("pause")}</button></div>
-      </section>
-      <div class="controls-legend"><div><span><kbd>W</kbd><span class="wasd"><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></span><span>Move</span><span class="legend-divider"></span><kbd>SPACE</kbd><span>Attack</span><kbd>SHIFT</kbd><span>Dash</span><kbd>E</kbd><span>Interact</span><kbd>Q</kbd><span>Heal</span></div><span class="touch-hint">${icon("compass")} Your next adventure is a tap away.</span><button data-panel="help">All controls ${icon("arrowUp")}</button></div>
-      <section class="below-game"><article class="chapter-card"><div class="card-icon">${icon("flag")}</div><div><div class="small-label">A SMALL FAVOR</div><h2>Every hero starts somewhere.</h2><p>Find Rowan by the campfire. He could use a hand.</p><button class="text-link" data-panel="book">See your first quest ${icon("arrow")}</button></div><span class="chapter-number">01</span></article><article class="field-card"><div class="small-label">${icon("book")} FIELD NOTES <span>NO. 001</span></div><p>“The forest doesn’t ask where you’ve been.<br>Only where you’re going.”</p><span>— A traveler’s journal</span></article></section>
-      <footer class="page-footer"><span><i class="online-dot"></i> YOUR WORLD, YOUR PACE.</span><span>Crafted with pixels. Filled with possibility. ${icon("spark")}</span></footer>
-    </main>
-  </div>
-  <div id="toasts" role="status" aria-live="polite"></div>
-  <dialog id="panel"><div class="dialog-top"><span class="eyebrow" id="panel-eyebrow">YOUR ADVENTURE</span><button class="icon-btn" id="close-panel" aria-label="Close dialog">${icon("close")}</button></div><div id="panel-content"></div></dialog>
-`;
+const portrait = (kind: string) => portraits[kind] ?? enemies[kind];
+let battle: Battle = beginBattle(save),
+  selected = "sentinel",
+  busy = false,
+  paused = false,
+  automatic = false,
+  fast = false,
+  boost = false,
+  ready = false,
+  skillOpen = false;
+let nextTimer: ReturnType<typeof setTimeout> | undefined;
+let selectedBuild = "ash";
+let audio: AudioContext | undefined;
+let reward: { gold: number; xp: number; leveled: boolean } | null = null;
 
-const $ = (s: string) => document.querySelector<HTMLElement>(s)!;
-const setText = (s: string, t: string) =>
-  document.querySelectorAll(s).forEach((el) => (el.textContent = t));
-let saveTimer: ReturnType<typeof setTimeout>;
-function save() {
-  clearTimeout(saveTimer);
+document.querySelector("#app")!.innerHTML = `
+<header class="topbar">
+  <a class="brand" href="./" aria-label="Pixel Rebirth"><span class="brand-rune">✦</span><span>PIXEL <b>REBIRTH</b><small>A NEW LEGACY</small></span><em>HD·2D</em></a>
+  <nav aria-label="Main navigation"><button class="nav-link active" data-panel="adventure">${icon("compass")}<span>Adventure</span></button><button class="nav-link" data-panel="party">${icon("person")}<span>Party & builds</span></button><button class="nav-link" data-panel="codex">${icon("book")}<span>Codex</span></button></nav>
+  <div class="topbar-tools"><span class="gold-counter"><i>◆</i><b id="gold-value">150</b><small>G</small></span><span class="account-level">LV. <b id="level-value">1</b></span><button class="icon-btn" data-panel="settings" aria-label="Settings / ตั้งค่า">${icon("settings")}</button></div>
+</header>
+<main class="battle-shell">
+  <section class="battlefield" aria-label="2.5D turn-based battlefield">
+    <div id="game"></div><div class="cinematic-shade"></div>
+    <div class="location-heading"><span class="eyebrow"><i></i> CHAPTER I <b> / </b> THE CRYSTAL WAKE</span><h1 id="stage-name">The Hollow Sanctuary</h1><p id="stage-thai">วิหารแห่งแสงที่ถูกลืม</p><button class="location-link" data-panel="adventure">${icon("pin")} EXPEDITION <span id="stage-number">01</span> / 03 ${icon("chevron")}</button></div>
+    <div class="turn-order"><span class="micro-label">TURN ORDER</span><div id="timeline"></div><span class="round-indicator">ROUND <b id="round-value">01</b></span></div>
+    <div class="battle-tools"><button id="speed" aria-label="Toggle battle speed">1× <span>SPEED</span></button><button id="auto" aria-label="Toggle auto battle" aria-pressed="false">${icon("play")}<span>AUTO</span></button><button class="icon-btn" id="fullscreen" aria-label="Fullscreen">${icon("expand")}</button><button class="icon-btn" data-panel="help" aria-label="How to play / วิธีเล่น">${icon("help")}</button></div>
+    <div class="scene-caption"><span class="caption-diamond">◇</span><span>Where the forgotten light awakens.</span><i></i></div>
+    <div class="battle-announcement" id="announcement" hidden></div>
+    <div id="result" class="result-overlay" hidden></div>
+    <div id="loading"><div class="loading-rune">✧</div><h2>The sanctuary awakens.</h2><p>กำลังเตรียมการผจญภัยของคุณ…</p></div>
+  </section>
+  <section class="battle-hud" aria-label="Battle controls">
+    <div class="party-panel"><div class="panel-heading"><span class="micro-label"><i></i> YOUR PARTY <b id="party-alive">3 / 3</b></span><button class="text-button" data-panel="party">จัดบิลด์ตัวละคร ${icon("arrowUp")}</button></div><div class="party-cards" id="party-cards"></div><div class="battle-log"><span class="log-icon">✧</span><p id="combat-log">แสงผลึกส่องนำทาง — การต่อสู้เริ่มขึ้น</p><button data-panel="log" aria-label="Battle log">${icon("book")}</button></div></div>
+    <div class="command-panel"><div class="command-top"><div><span class="micro-label" id="turn-label">YOUR TURN</span><strong id="actor-name">Kael<span> / VEIL RANGER</span></strong></div><button id="boost" class="boost-button" aria-pressed="false">${icon("bolt")} BOOST <small>2 BP</small></button></div><div class="target-row"><span>TARGET</span><button id="target-prev" aria-label="Previous target">${icon("chevron")}</button><b id="target-name">Hollow Sentinel</b><button id="target-next" aria-label="Next target">${icon("chevron")}</button></div><div id="skill-menu" class="skill-menu" hidden></div><div class="command-grid"><button data-action="attack" class="command attack" aria-label="Attack / โจมตี"><span class="command-icon">${icon("sword")}</span><span><b>โจมตี</b><small>Attack</small></span><kbd>1</kbd></button><button id="skill-toggle" class="command" aria-label="Skills / ทักษะ" aria-expanded="false"><span class="command-icon">${icon("spark")}</span><span><b>ทักษะ</b><small>Skills</small></span><kbd>2</kbd></button><button data-action="guard" class="command" aria-label="Guard / ป้องกัน"><span class="command-icon">${icon("heart")}</span><span><b>ป้องกัน</b><small>Guard · +BP</small></span><kbd>3</kbd></button><button data-action="item" class="command" aria-label="Potion / ใช้ยา"><span class="command-icon">${icon("potion")}</span><span><b>ใช้ไอเทม</b><small>Healing potion <em id="potion-count">×5</em></small></span><kbd>4</kbd></button></div><div class="command-footer"><i></i><span id="command-hint">เลือกคำสั่งเมื่อพร้อม</span><span class="turn-based-tag">TURN-BASED</span></div></div>
+  </section>
+</main>
+<footer class="bottom-bar"><span><i></i> <b id="save-status">PROGRESS SAVED</b><span class="footer-divider">/</span> ORIGINAL WORLD. YOUR LEGACY.</span><span>เลือกเส้นทางของคุณ แล้วสร้างตำนานบทใหม่ <em>✧</em></span><button class="sound-btn" aria-label="Toggle sound">${icon(save.sound ? "sound" : "mute")}<span>SOUND ${save.sound ? "ON" : "OFF"}</span></button></footer>
+<dialog id="panel"><div class="dialog-top"><span class="eyebrow">PIXEL REBIRTH <b> / </b> YOUR LEGACY</span><button class="icon-btn" id="close-panel" aria-label="Close dialog / ปิด">${icon("close")}</button></div><div id="panel-content"></div></dialog><div id="toasts" role="status" aria-live="polite"></div>
+`;
+const dialog = $("#panel") as HTMLDialogElement;
+function persist() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(progress));
+    localStorage.setItem(TACTICS_KEY, JSON.stringify(save));
     storageAvailable = true;
-    $("#save-status").textContent = "All progress saved";
   } catch {
     storageAvailable = false;
-    $("#save-status").textContent = "Session only";
   }
+  $("#save-status").textContent = storageAvailable
+    ? "PROGRESS SAVED"
+    : "SESSION ONLY";
 }
-function render() {
-  setText("[data-level]", `LV. ${progress.level}`);
-  setText("[data-gold]", `${progress.gold}`);
-  setText("[data-kills]", `${Math.min(progress.kills, 5)}/5`);
-  $("#health-fill").style.width =
-    `${Math.max(0, (progress.hp / maxHp(progress)) * 100)}%`;
-  $("#health-value").textContent =
-    `${Math.max(0, progress.hp)} / ${maxHp(progress)} HP`;
-  $("#xp-fill").style.width = `${(progress.xp / nextLevelXp(progress)) * 100}%`;
-  $("#xp-value").textContent = `${progress.xp} / ${nextLevelXp(progress)} XP`;
-  $("#potion-count").textContent = String(progress.potions);
-  $("#inventory-count").textContent = String(
-    1 + progress.potions + progress.crystals,
-  );
-  $("#quest-fill").style.width = `${Math.min(progress.kills / 5, 1) * 100}%`;
-  $("#quest-check").classList.toggle("complete", progress.kills >= 5);
-  $("#quest-check").innerHTML = progress.kills >= 5 ? icon("check") : "";
-  if (progress.questClaimed) {
-    $(".sidebar-quest h3").textContent = "Beyond the bridge";
-    $(".sidebar-quest p").textContent = progress.bossDefeated
-      ? "The woods are safe. Well done, Ash."
-      : "Find the Grove Guardian in the eastern ruins.";
-    $("#quest-task-label").textContent = "Defeat Grove Guardian";
-    setText("[data-kills]", progress.bossDefeated ? "1/1" : "0/1");
-    $("#quest-fill").style.width = progress.bossDefeated ? "100%" : "0%";
-    $("#quest-check").classList.toggle("complete", progress.bossDefeated);
-    $("#quest-check").innerHTML = progress.bossDefeated ? icon("check") : "";
-  }
-  $("#save-status").textContent = storageAvailable ? "Saving…" : "Session only";
-  saveTimer = setTimeout(save, 300);
-}
-function toast(text: string, kind = "") {
-  const el = document.createElement("div");
-  el.className = `toast ${kind}`;
-  el.innerHTML = icon(kind === "success" ? "spark" : "leaf");
+function toast(text: string) {
+  const e = document.createElement("div");
+  e.className = "toast";
+  e.innerHTML = icon("spark");
   const span = document.createElement("span");
   span.textContent = text;
-  el.append(span);
-  $("#toasts").append(el);
-  setTimeout(() => el.remove(), 6500);
+  e.append(span);
+  $("#toasts").append(e);
+  setTimeout(() => e.remove(), 4200);
   while ($("#toasts").children.length > 3)
     $("#toasts").firstElementChild?.remove();
 }
-let soundEnabled = false;
-let audio: AudioContext | undefined;
 function sound(kind: string) {
-  if (!soundEnabled) return;
+  if (!save.sound) return;
   try {
     audio ??= new AudioContext();
     void audio.resume();
-    const freqs: Record<string, number[]> = {
-      attack: [190, 100],
-      hurt: [130, 70],
-      pickup: [540, 810],
-      level: [392, 494, 587, 784],
-      dash: [300, 150],
-    };
-    (freqs[kind] ?? [440]).forEach((f, i) => {
+    const tones =
+      kind === "heal"
+        ? [440, 660, 880]
+        : kind === "victory"
+          ? [392, 494, 587, 784]
+          : kind === "magic"
+            ? [330, 660, 990]
+            : [180, 110];
+    tones.forEach((hz, i) => {
       const o = audio!.createOscillator(),
         g = audio!.createGain();
       o.type = "triangle";
-      o.frequency.value = f;
-      g.gain.setValueAtTime(0.045, audio!.currentTime + i * 0.075);
+      o.frequency.value = hz;
+      g.gain.setValueAtTime(0.035, audio!.currentTime + i * 0.065);
       g.gain.exponentialRampToValueAtTime(
         0.001,
-        audio!.currentTime + i * 0.075 + 0.14,
+        audio!.currentTime + i * 0.065 + 0.17,
       );
       o.connect(g).connect(audio!.destination);
-      o.start(audio!.currentTime + i * 0.075);
-      o.stop(audio!.currentTime + i * 0.075 + 0.15);
+      o.start(audio!.currentTime + i * 0.065);
+      o.stop(audio!.currentTime + i * 0.065 + 0.18);
     });
   } catch {
-    soundEnabled = false;
-    toast("Audio is unavailable in this browser.");
+    save.sound = false;
   }
 }
-const scene = new ForestScene(progress, {
-  change: render,
-  message: toast,
-  sound,
+const scene = new BattleScene({
   ready: () => {
+    ready = true;
+    for (const k of Object.keys(CLASSES))
+      portraits[k] = portraitArt(k as ClassId);
     $("#loading").remove();
+    scene.sync(battle);
     $("#game canvas").setAttribute(
       "aria-label",
-      "Whispering Woods adventure. Use WASD to move, Space to attack, E to interact.",
+      "2.5D fantasy turn-based battle arena",
     );
+    render();
+    schedule();
+  },
+  select: (id) => {
+    selected = id;
     render();
   },
 });
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
-  backgroundColor: "#3d5d42",
-  pixelArt: true,
-  roundPixels: true,
+  backgroundColor: "#0b1822",
+  transparent: false,
   scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
   scene: [scene],
   audio: { noAudio: true },
-  input: { activePointers: 4 },
-  render: { antialias: false, powerPreference: "low-power" },
+  render: { antialias: true, powerPreference: "low-power" },
+  input: { activePointers: 3 },
 });
-game.events.on("position", ({ x, y }: { x: number; y: number }) => {
-  const d = $("#map-dot");
-  d.setAttribute("cx", String((x / WORLD.width) * 124));
-  d.setAttribute("cy", String((y / WORLD.height) * 100));
-  const nearRowan = Math.hypot(x - 535, y - 516) < 100,
-    nearChest = Math.hypot(x - 887, y - 474) < 90;
-  $("#interaction-hint").hidden = !(nearRowan || nearChest);
-  $("#interaction-hint span").textContent = nearRowan
-    ? "Talk to Rowan"
-    : progress.openedChest
-      ? "Empty chest"
-      : "Open treasure chest";
-});
-render();
-
-const dialog = $("#panel") as HTMLDialogElement;
-let manuallyPaused = false;
-function pause(value: boolean) {
-  manuallyPaused = value;
-  scene.setPaused(value || dialog.open);
-  $("#resume-game").hidden = !value;
-  $("#pause").innerHTML = icon(value ? "play" : "pause");
-  $("#pause").setAttribute("aria-label", value ? "Resume game" : "Pause game");
-  $(".live-status").innerHTML = `<i></i> ${value ? "PAUSED" : "EXPLORING"}`;
+function isPlayerTurn() {
+  return (
+    ready &&
+    !busy &&
+    !paused &&
+    !dialog.open &&
+    battle.phase === "ready" &&
+    activeFighter(battle)?.side === "party"
+  );
 }
-const controls = `<div class="help-intro">A quiet forest. A rusty sword. A whole lot of possibility.<br>Your story begins at the crossroads.</div><div class="help-controls"><div><span><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / arrow keys</span><strong>Explore the world</strong></div><div><kbd>SPACE</kbd><strong>Swing your sword</strong></div><div><kbd>SHIFT</kbd><strong>Dash & dodge · 1.5s cooldown</strong></div><div><kbd>E</kbd><strong>Talk to Rowan / open a chest</strong></div><div><kbd>Q</kbd><strong>Drink a healing potion</strong></div><div><kbd>I</kbd><strong>Open your inventory</strong></div></div><p class="dialog-note">On mobile, use the direction pad and action buttons. Collect glowing crystals by walking over them. Defeat slimes to earn XP and level up. Progress saves automatically on this browser.</p>`;
-function showPanel(key: string) {
-  $(".sidebar").classList.remove("mobile-open");
-  $(".mobile-menu").setAttribute("aria-expanded", "false");
-  if (key === "compass") {
-    if (dialog.open) dialog.close();
-    scene.setPaused(manuallyPaused);
+function ensureTarget() {
+  if (!living(battle, "enemy").some((a) => a.id === selected))
+    selected = living(battle, "enemy")[0]?.id ?? "";
+  scene.selected = selected;
+}
+function render() {
+  ensureTarget();
+  const actor = activeFighter(battle),
+    player = isPlayerTurn();
+  $("#gold-value").textContent = String(save.gold);
+  $("#level-value").textContent = String(save.level);
+  $("#stage-name").textContent = STAGES[battle.stage].name;
+  $("#stage-thai").textContent = STAGES[battle.stage].thai;
+  $("#stage-number").textContent = String(battle.stage + 1).padStart(2, "0");
+  $(".location-heading .eyebrow").innerHTML =
+    `<i></i> CHAPTER ${["I", "II", "III"][battle.stage]} <b> / </b> ${STAGES[battle.stage].chapter}`;
+  $("#round-value").textContent = String(battle.round).padStart(2, "0");
+  $("#timeline").innerHTML = battle.queue
+    .map((_, offset) => {
+      const id = battle.queue[(battle.cursor + offset) % battle.queue.length],
+        a = battle.actors.find((a) => a.id === id)!;
+      return a.hp > 0
+        ? `<span class="turn-slot ${offset === 0 ? "current" : ""} ${a.side === "enemy" ? "enemy" : ""}" title="${a.name}"><img src="${portrait(a.classId)}" class="pixel-art" alt="${a.name}"/>${offset === 0 ? "<i></i>" : ""}</span>`
+        : "";
+    })
+    .join("");
+  $("#party-alive").textContent = `${living(battle, "party").length} / 3`;
+  $("#party-cards").innerHTML = battle.actors
+    .filter((a) => a.side === "party")
+    .map(
+      (a) =>
+        `<button class="party-card ${actor?.id === a.id ? "active" : ""} ${a.hp <= 0 ? "fallen" : ""}" data-build="${a.id}" aria-label="Build ${a.name}"><div class="hero-portrait"><img class="pixel-art" src="${portraits[a.classId]}" alt=""/><span>${CLASSES[a.classId as ClassId].role[0]}</span></div><div class="hero-card-main"><div class="hero-card-name"><strong>${a.name}</strong><span>LV ${save.level}</span></div><span class="hero-class">${CLASSES[a.classId as ClassId].name}</span><div class="hero-meter"><span>HP</span><div><i style="width:${(a.hp / a.maxHp) * 100}%"></i></div><b>${a.hp}<small>/${a.maxHp}</small></b></div><div class="hero-meter mp"><span>MP</span><div><i style="width:${(a.mp / a.maxMp) * 100}%"></i></div><b>${a.mp}<small>/${a.maxMp}</small></b></div><div class="bp-row"><span>BP</span>${[1, 2, 3].map((n) => `<i class="${a.bp >= n ? "filled" : ""}"></i>`).join("")}${a.guarding ? "<em>GUARD</em>" : a.hp <= 0 ? "<em>DOWN</em>" : ""}</div></div></button>`,
+    )
+    .join("");
+  document.querySelectorAll<HTMLElement>("[data-build]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        selectedBuild = el.dataset.build!;
+        showPanel("party");
+      }),
+  );
+  $("#actor-name").innerHTML = actor
+    ? `${actor.name}<span> / ${actor.side === "party" ? CLASSES[actor.classId as ClassId].role : "HOSTILE"}</span>`
+    : "The adventure continues";
+  $("#turn-label").textContent =
+    battle.phase === "victory"
+      ? "VICTORY"
+      : battle.phase === "defeat"
+        ? "A SECOND CHANCE"
+        : paused
+          ? "PAUSED"
+          : busy
+            ? "RESOLVING ACTION"
+            : actor?.side === "enemy"
+              ? "ENEMY TURN"
+              : "YOUR TURN";
+  $("#target-name").textContent =
+    battle.actors.find((a) => a.id === selected)?.name ?? "—";
+  $("#potion-count").textContent = `×${battle.potions}`;
+  document
+    .querySelectorAll<HTMLButtonElement>(".command-grid button")
+    .forEach((b) => (b.disabled = !player));
+  const boostButton = $("#boost") as HTMLButtonElement;
+  boostButton.disabled = !player || (actor?.bp ?? 0) < 2;
+  boostButton.classList.toggle("enabled", boost);
+  boostButton.setAttribute("aria-pressed", String(boost));
+  $("#command-hint").textContent = paused
+    ? "หยุดพัก — กดเล่นต่อได้เลย"
+    : battle.phase !== "ready"
+      ? "การเดินทางบทใหม่กำลังรออยู่"
+      : busy
+        ? "กำลังแสดงผลการต่อสู้…"
+        : actor?.side === "enemy"
+          ? "ศัตรูกำลังเลือกการโจมตี…"
+          : boost
+            ? "บูสต์พร้อม! คำสั่งถัดไปรุนแรงขึ้น 65%"
+            : "เลือกคำสั่งเมื่อพร้อม ไม่มีเวลาจำกัด";
+  $("#combat-log").textContent =
+    battle.log.filter((l) => l !== "REWARDS_CLAIMED").at(-1) ?? "";
+  $("#skill-menu").hidden = !skillOpen || !player;
+  $("#skill-toggle").setAttribute("aria-expanded", String(skillOpen && player));
+  if (actor?.side === "party")
+    $("#skill-menu").innerHTML =
+      `<button data-skill="skill" ${actor.mp < CLASSES[actor.classId as ClassId].cost ? "disabled" : ""}><span>${icon("spark")}<b>${CLASSES[actor.classId as ClassId].skill}</b><small>${actor.classId === "arcanist" ? "โจมตีเวทศัตรูทั้งหมด" : actor.classId === "warden" ? "โจมตีหนักและทลายเกราะ" : "ลูกศรทะลุเกราะ"}</small></span><em>${CLASSES[actor.classId as ClassId].cost} MP</em></button><button data-skill="restore" ${actor.mp < 16 ? "disabled" : ""}><span>${icon("heart")}<b>Starlight Mend</b><small>ฟื้นฟูเพื่อนที่บาดเจ็บที่สุด</small></span><em>16 MP</em></button>`;
+  document
+    .querySelectorAll<HTMLElement>("[data-skill]")
+    .forEach(
+      (el) => (el.onclick = () => void act(el.dataset.skill as ActionId)),
+    );
+  $("#auto").classList.toggle("enabled", automatic);
+  $("#auto").setAttribute("aria-pressed", String(automatic));
+  $("#speed").innerHTML = `${fast ? "2" : "1"}× <span>SPEED</span>`;
+}
+function schedule() {
+  clearTimeout(nextTimer);
+  if (!ready || busy || paused || dialog.open || battle.phase !== "ready")
+    return;
+  const actor = activeFighter(battle);
+  if (actor?.side === "enemy")
+    nextTimer = setTimeout(() => void act("attack", true), fast ? 180 : 650);
+  else if (automatic)
+    nextTimer = setTimeout(() => void act("attack"), fast ? 180 : 650);
+}
+async function act(action: ActionId, enemy = false) {
+  if (!ready || busy || paused || dialog.open || battle.phase !== "ready")
+    return;
+  const actor = activeFighter(battle);
+  if (!actor || enemy !== (actor.side === "enemy")) return;
+  const problem = canAct(battle, action, !enemy && boost);
+  if (problem) {
+    toast(problem);
     return;
   }
-  scene.setPaused(true);
-  let content = "";
-  if (key === "help")
-    content = `<h2>A little guide to your adventure.</h2>${controls}<button class="button primary dialog-play" id="begin-adventure">${icon("compass")} Let’s explore</button>`;
-  if (key === "person")
-    content = `<h2>Meet Ash.</h2><p class="dialog-subtitle">Every legend has a first chapter. This one is yours.</p><div class="character-sheet"><div class="character-preview"><img class="pixel-art" src="${portrait}" alt="Ash" /><span>ASH · LEVEL ${progress.level}</span></div><div><span class="tag">NOVICE ADVENTURER</span><h3>A heart for the unknown.</h3><p>A wanderer with a well-worn scarf, an iron sword, and a knack for finding trouble.</p><div class="stat-grid"><div>${icon("heart")}<span>Health</span><b>${progress.hp} / ${maxHp(progress)}</b></div><div>${icon("sword")}<span>Attack</span><b>${attackPower(progress)}</b></div><div>${icon("bolt")}<span>Speed</span><b>155</b></div><div>${icon("spark")}<span>Experience</span><b>${progress.xp} / ${nextLevelXp(progress)}</b></div></div></div></div><p class="dialog-note">Level up by defeating enemies, collecting forest crystals and completing quests. Each level restores your health and increases your strength.</p>`;
-  if (key === "bag")
-    content = `<h2>Room for a little wonder.</h2><p class="dialog-subtitle">Your inventory · ${progress.gold} gold in your pocket</p><div class="inventory-grid"><div class="inventory-item">${item("sword")}<span class="tag">EQUIPPED</span><h3>Iron sword</h3><p>A reliable beginning.</p><strong>${attackPower(progress)} attack</strong></div><div class="inventory-item">${item("potion")}<span class="tag">× ${progress.potions}</span><h3>Healing potion</h3><p>Restores 65 health.</p><button class="button secondary" id="inventory-heal" ${progress.potions === 0 || progress.hp >= maxHp(progress) ? "disabled" : ""}>Use potion</button></div><div class="inventory-item">${item("crystal")}<span class="tag">× ${progress.crystals}</span><h3>Forest crystal</h3><p>A little piece of the woods.</p><strong>Collected treasure</strong></div></div><p class="dialog-note">Visit Rowan at the campfire after your first quest to buy potions for 15 gold. Open the chest north-east of the crossroads for extra supplies.</p>`;
-  if (key === "map")
-    content = `<h2>Somewhere worth getting lost.</h2><p class="dialog-subtitle">Whispering Woods · The first of many adventures</p><div class="full-map"><svg viewBox="0 0 600 340" role="img" aria-label="World map: campsite in the west, crossroads in the center, Grove Guardian in the northeast, bridge in the east"><defs><pattern id="trees" width="38" height="40" patternUnits="userSpaceOnUse"><path d="m19 5 13 23H6Z" fill="#496548"/><path d="m19 10 8 14H11Z" fill="#607d50"/></pattern></defs><rect width="600" height="340" rx="8" fill="#38523d"/><rect x="5" y="5" width="590" height="330" fill="url(#trees)"/><path d="m0 185 125 5 145-15 145 15 185-10M265 0l-8 85 14 90-8 165" stroke="#a99e70" stroke-width="22" fill="none"/><path d="m430-10-12 90 18 70-8 100 12 100" stroke="#69a091" stroke-width="39" fill="none"/><path d="M402 175h56v28h-56" fill="#b7a06c"/><rect x="494" y="62" width="65" height="57" fill="#8a9170" stroke="#b2b694" stroke-width="5"/><g fill="#ede6bd" font-size="13" font-family="monospace"><text x="115" y="130">CAMP</text><text x="215" y="226">CROSSROADS</text><text x="466" y="49">OLD RUINS</text><text x="451" y="237">BRIDGE</text></g><circle cx="185" cy="153" r="6" fill="#daa366"/><circle cx="${((scene.player?.x ?? 710) / 1600) * 600}" cy="${((scene.player?.y ?? 600) / 1120) * 340}" r="7" fill="#f8eac0" stroke="#273d31" stroke-width="3"/><path d="m522 78 6 10-6 10-6-10Z" fill="#dfaa69"/></svg></div><div class="map-legend"><span><i></i> You are here</span><span><i></i> Rowan’s campsite</span><span><i></i> Grove Guardian</span></div><p class="dialog-note">Head west from the crossroads to find Rowan. Follow the trail east, cross the wooden bridge, then go north to discover the old ruins.</p>`;
-  if (key === "book")
-    content = `<h2>Little quests. Lasting stories.</h2><p class="dialog-subtitle">The Whispering Woods journal</p><article class="quest-detail"><div class="small-label">CHAPTER 01 <span class="tag">${progress.questClaimed ? "COMPLETED" : progress.kills >= 5 ? "RETURN TO ROWAN" : "IN PROGRESS"}</span></div><h3>A little less slime</h3><p>“The slimes have gotten a little too comfortable on our trails. Could you lend an old ranger a hand?”</p><span class="quest-giver">— Rowan, the forest ranger</span><div class="quest-objective">${icon(progress.kills >= 5 ? "check" : "sword")}<strong>Defeat 5 forest slimes</strong><b>${Math.min(progress.kills, 5)} / 5</b></div><div class="quest-objective">${icon(progress.questClaimed ? "check" : "person")}<strong>Return to Rowan at the campsite</strong></div><div class="quest-rewards"><span>YOUR REWARD</span><b>${item("coin")}75 gold</b><b>${icon("spark")}80 XP</b><b>${item("potion")}2 potions</b></div></article><article class="quest-next"><div>${icon("flag")}</div><div><h3>Beyond the bridge</h3><p>${progress.bossDefeated ? "Completed — the Grove Guardian has fallen." : progress.questClaimed ? "The Grove Guardian lurks in the eastern ruins. Defeat it to restore peace." : "Complete your first quest. There’s more to this forest than meets the eye."}</p></div></article>`;
+  busy = true;
+  skillOpen = false;
+  clearTimeout(nextTimer);
+  const actionName = enemy
+    ? `${actor.name} · Attack`
+    : action === "skill"
+      ? CLASSES[actor.classId as ClassId].skill
+      : action === "restore"
+        ? "Starlight Mend"
+        : action === "guard"
+          ? "Defensive Stance"
+          : action === "item"
+            ? "Healing Potion"
+            : boost
+              ? "Boosted Strike"
+              : "Attack";
+  const events: CombatEvent[] = enemy
+    ? enemyAction(battle)
+    : performAction(
+        battle,
+        action,
+        action === "item" || action === "restore" ? undefined : selected,
+        boost,
+      );
+  boost = false;
+  save.potions = battle.potions;
+  persist();
+  $("#announcement").textContent = actionName;
+  $("#announcement").hidden = false;
+  render();
+  sound(
+    action === "item" || action === "restore"
+      ? "heal"
+      : action === "skill"
+        ? "magic"
+        : "attack",
+  );
+  await scene.play(events, battle, fast);
+  $("#announcement").hidden = true;
+  busy = false;
+  save.potions = battle.potions;
+  settleAction();
+}
+function settleAction() {
+  if (battle.phase === "victory") {
+    reward = awardVictory(save, battle);
+    persist();
+    showResult();
+    sound("victory");
+  } else if (battle.phase === "defeat") {
+    persist();
+    showResult();
+  } else persist();
+  render();
+  schedule();
+}
+function startBattle(stage: number) {
+  if (busy) return;
+  clearTimeout(nextTimer);
+  battle = beginBattle(save, stage);
+  reward = null;
+  boost = false;
+  skillOpen = false;
+  paused = false;
+  selected = living(battle, "enemy")[0].id;
+  $("#result").hidden = true;
+  if (dialog.open) dialog.close();
+  scene.sync(battle);
+  render();
+  schedule();
+}
+function showResult() {
+  const victory = battle.phase === "victory";
+  $("#result").hidden = false;
+  $("#result").innerHTML =
+    `<div class="result-card"><span class="result-sigil">${victory ? "✦" : "◇"}</span><span class="eyebrow">${victory ? "THE LIGHT REMAINS" : "YOUR LEGACY CONTINUES"}</span><h2>${victory ? "Victory" : "Rise again"}</h2><p>${victory ? "อีกหนึ่งบทของตำนานที่คุณเป็นผู้เขียน" : "ความพ่ายแพ้คือจุดเริ่มต้นของบิลด์ที่แข็งแกร่งกว่า"}</p>${victory ? `<div class="rewards"><span><b>+${reward?.gold ?? 0}</b> GOLD</span><span><b>+${reward?.xp ?? 0}</b> XP</span>${reward?.leveled ? `<span><b>LEVEL ${save.level}</b> +2 TALENT POINTS</span>` : ""}</div>` : ""}<div class="result-actions"><button class="button primary" id="next-battle">${victory && battle.stage < 2 ? "ด่านถัดไป" : "เริ่มการต่อสู้อีกครั้ง"} ${icon("arrow")}</button><button class="button secondary" id="result-build">จัดบิลด์ตัวละคร</button></div><button class="text-button" id="result-expeditions">เลือกด่านการเดินทาง ${icon("compass")}</button></div>`;
+  $("#next-battle").onclick = () =>
+    startBattle(victory ? Math.min(2, battle.stage + 1) : battle.stage);
+  $("#result-build").onclick = () => showPanel("party");
+  $("#result-expeditions").onclick = () => showPanel("adventure");
+}
+function cycleTarget(dir: number) {
+  const targets = living(battle, "enemy");
+  if (!targets.length) return;
+  const index = targets.findIndex((t) => t.id === selected);
+  selected = targets[(index + dir + targets.length) % targets.length].id;
+  render();
+}
+function showPanel(key: string) {
+  clearTimeout(nextTimer);
+  skillOpen = false;
+  let html = "";
+  if (key === "party") {
+    const b = save.builds.find((b) => b.id === selectedBuild) ?? save.builds[0],
+      a = stats(b, save.level),
+      cls = CLASSES[b.classId];
+    html = `<div class="dialog-title"><span class="eyebrow">YOUR PARTY. YOUR PLAYSTYLE.</span><h2>Forge your legacy<span>.</span></h2><p>เลือกอาชีพ ลงแต้ม และสร้างบิลด์ที่เป็นของคุณ</p></div><div class="build-tabs">${save.builds.map((b) => `<button data-build-tab="${b.id}" class="${b.id === selectedBuild ? "selected" : ""}"><img src="${portraits[b.classId]}" class="pixel-art" alt=""/>${b.name}<small>${CLASSES[b.classId].role}</small></button>`).join("")}</div><div class="build-sheet"><div class="build-preview"><div class="character-aura"></div><img class="pixel-art" src="${fighterArt(b.classId).toDataURL()}" alt="${b.name} ${cls.name}"/><span>${b.name}</span><small>LEVEL ${save.level}</small></div><div class="build-info"><div class="build-class-name"><span class="eyebrow">${cls.role}</span><h3>${cls.name}</h3><p>${cls.description}</p></div><div class="class-selector">${Object.entries(
+      CLASSES,
+    )
+      .map(
+        ([id, c]) =>
+          `<button data-class="${id}" class="${id === b.classId ? "selected" : ""}" aria-label="Class ${c.name}">${icon(id === "warden" ? "sword" : id === "arcanist" ? "spark" : "compass")}<span>${c.thai}</span></button>`,
+      )
+      .join(
+        "",
+      )}</div><div class="build-stats"><span>HP <b>${a.maxHp}</b></span><span>MP <b>${a.maxMp}</b></span><span>ATK <b>${a.attack}</b></span><span>MAG <b>${a.magic}</b></span><span>DEF <b>${a.defense}</b></span><span>SPD <b>${a.speed}</b></span></div><div class="talent-heading"><span class="micro-label">TALENT POINTS <b id="talent-points">${pointsLeft(save, b)} AVAILABLE</b></span><button id="respec" class="text-button">คืนแต้มทั้งหมด</button></div><div class="talents">${(
+      [
+        ["might", "พลังโจมตี", "ATK +4"],
+        ["vitality", "ความทนทาน", "HP +18 / DEF +2"],
+        ["spirit", "พลังเวท", "MAG +4 / MP +6"],
+        ["haste", "ความเร็ว", "SPD +3"],
+      ] as const
+    )
+      .map(
+        ([id, label, bonus]) =>
+          `<div><span><strong>${label}</strong><small>${bonus}</small></span><b>${b.talents[id]}</b><button data-talent="${id}" aria-label="Allocate ${id}" ${pointsLeft(save, b) <= 0 ? "disabled" : ""}>+</button></div>`,
+      )
+      .join(
+        "",
+      )}</div></div></div><div class="equipment-row"><span class="equipment-icon">${icon(b.classId === "arcanist" ? "spark" : "sword")}</span><div><span class="eyebrow">EQUIPPED WEAPON</span><strong>${b.upgraded ? cls.upgrade : cls.weapon}</strong><small>${b.upgraded ? "อัปเกรดแล้ว · ATK +12 / MAG +10" : "อัปเกรดเพื่อเพิ่ม ATK +12 / MAG +10"}</small></div><button class="button secondary" id="upgrade-weapon" ${b.upgraded || save.gold < 100 ? "disabled" : ""}>${b.upgraded ? "อัปเกรดแล้ว" : "อัปเกรด · 100 G"}</button></div><div class="build-bottom"><p>การปรับบิลด์จะมีผลเมื่อเริ่มการต่อสู้ใหม่ คืนแต้มได้ฟรี</p><button class="button primary" id="apply-build">นำบิลด์ลงสนาม ${icon("arrow")}</button></div>`;
+  }
+  if (key === "adventure")
+    html = `<div class="dialog-title"><span class="eyebrow">A WORLD WAITING TO BE REMEMBERED</span><h2>Choose your chapter<span>.</span></h2><p>ฟื้นแสงแห่งผลึก เดินทางผ่าน 3 บท และเผชิญราชันแห่งคราส</p></div><div class="expedition-grid">${STAGES.map((s, i) => `<button class="expedition-card stage-${i} ${i > save.unlocked ? "locked" : ""}" data-stage="${i}" ${i > save.unlocked ? "disabled" : ""}><span class="expedition-number">0${i + 1}</span><div><span class="eyebrow">${save.cleared.includes(i) ? "COMPLETED" : i > save.unlocked ? "LOCKED" : "READY TO EXPLORE"}</span><h3>${s.name}</h3><p>${s.thai}</p><small>${s.description}</small><strong>${s.reward} G <i>·</i> ${s.xp} XP ${icon(i > save.unlocked ? "settings" : "arrow")}</strong></div></button>`).join("")}</div><p class="dialog-note">เลือกด่านที่ปลดล็อกเพื่อเริ่มการต่อสู้ใหม่ เล่นซ้ำเพื่อเก็บเลเวลและเงินได้</p>`;
+  if (key === "codex" || key === "help")
+    html = `<div class="dialog-title"><span class="eyebrow">THE TRAVELER'S CODEX</span><h2>A little strategy. A lasting legend<span>.</span></h2><p>ทุกคำสั่งสร้างความแตกต่าง — ค่อย ๆ เลือกได้ ไม่มีเวลาจำกัด</p></div><div class="codex-grid"><article>${icon("compass")}<h3>ลำดับเทิร์น</h3><p>ตัวละครที่มี SPD สูงจะได้ลงมือก่อน ดูลำดับจากแถบด้านบน ศัตรูจะโจมตีเมื่อถึงเทิร์นของมัน</p></article><article>${icon("bolt")}<h3>Boost · 2 BP</h3><p>แตะ BOOST ก่อนเลือกคำสั่งเพื่อเพิ่มพลัง 65% ทุกคำสั่งเพิ่ม BP 1 แต้ม การป้องกันเพิ่มได้อีก 1 แต้ม สูงสุด 3</p></article><article>${icon("sword")}<h3>บิลด์และอาชีพ</h3><p>Dawn Warden ทลายเกราะ · Starweaver ใช้เวทหมู่ · Veil Ranger ยิงทะลุเกราะ ปรับอาชีพและแต้มได้ใน Party & builds</p></article><article>${icon("heart")}<h3>ป้องกันและฟื้นฟู</h3><p>Guard ลดความเสียหาย 55% จนถึงเทิร์นถัดไปพร้อมคืน 8 MP ยาฟื้น 90 HP และ Starlight Mend ฟื้นฟูเพื่อนที่บาดเจ็บที่สุด รวมถึงเพื่อนที่ล้มลง</p></article></div><div class="help-keys"><span><kbd>1</kbd> โจมตี</span><span><kbd>2</kbd> ทักษะ</span><span><kbd>3</kbd> ป้องกัน</span><span><kbd>4</kbd> ยา</span><span><kbd>B</kbd> บูสต์</span></div><p class="dialog-note">บนโทรศัพท์แตะคำสั่งได้โดยตรง แตะศัตรูหรือใช้ลูกศร TARGET เพื่อเลือกเป้าหมาย แตะการ์ดสมาชิกเพื่อจัดบิลด์ เกมเซฟอัตโนมัติในเบราว์เซอร์นี้</p>`;
+  if (key === "log")
+    html = `<div class="dialog-title"><span class="eyebrow">EVERY MOVE TELLS A STORY</span><h2>Battle chronicle<span>.</span></h2></div><div class="chronicle">${battle.log
+      .filter((l) => l !== "REWARDS_CLAIMED")
+      .map((l) => `<p>${icon("spark")}${l}</p>`)
+      .join("")}</div>`;
   if (key === "settings")
-    content = `<h2>Make yourself at home.</h2><p class="dialog-subtitle">A few things to make the journey yours.</p><div class="settings-row"><div><h3>Game sounds</h3><p>Little sounds for your little adventures.</p></div><button class="toggle ${soundEnabled ? "on" : ""}" id="settings-sound" aria-label="Toggle game sounds" aria-pressed="${soundEnabled}"><i></i></button></div><div class="settings-row"><div><h3>Automatic saving</h3><p>${storageAvailable ? "Your progress is saved in this browser." : "Browser storage unavailable. Progress lasts this session."}</p></div><span class="tag">${storageAvailable ? "ACTIVE" : "SESSION ONLY"}</span></div><div class="settings-row"><div><h3>A fresh start</h3><p>Reset your character, inventory and quests.</p></div><button class="button danger" id="reset-progress">Reset progress</button></div><p class="dialog-note">Pixel Rebirth v0.1 · An original adventure built with Phaser and TypeScript. All character and world artwork is created for this game.</p>`;
-  $("#panel-content").innerHTML = content;
+    html = `<div class="dialog-title"><span class="eyebrow">MAKE THE JOURNEY YOURS</span><h2>A moment of quiet<span>.</span></h2></div><div class="setting-row"><div><h3>เสียงเกม</h3><p>เสียงการโจมตี เวทมนตร์ และชัยชนะ</p></div><button class="toggle ${save.sound ? "on" : ""}" id="settings-sound" aria-label="Toggle game sound" aria-pressed="${save.sound}"><i></i></button></div><div class="setting-row"><div><h3>การบันทึก</h3><p>${storageAvailable ? "เซฟอัตโนมัติในเบราว์เซอร์นี้" : "เบราว์เซอร์ไม่อนุญาตให้เซฟ เล่นได้ในเซสชันนี้"}</p></div><span class="tag">${storageAvailable ? "AUTO SAVE" : "SESSION ONLY"}</span></div><div class="setting-row"><div><h3>เสบียงการเดินทาง</h3><p>ยาฟื้นฟู 90 HP · มี ${save.potions} ขวด</p></div><button class="button secondary" id="buy-potion" ${save.gold < 25 ? "disabled" : ""}>ซื้อยา · 25 G</button></div><div class="setting-row"><div><h3>เริ่มตำนานใหม่</h3><p>ล้างเลเวล เงิน บิลด์ และความคืบหน้าเวอร์ชันเทิร์นเบส</p></div><button class="button danger" id="reset-save">ล้างเซฟ</button></div><p class="dialog-note">Pixel Rebirth v0.2 · Original HD·2D turn-based RPG prototype. ตัวละครวาดด้วย pixel grid ฉากต้นฉบับสร้างสำหรับเกมและจัดองค์ประกอบแบบหลายชั้น เซฟเวอร์ชันเดิมยังอยู่แยกต่างหาก</p>`;
+  $("#panel-content").innerHTML = html;
   if (!dialog.open) dialog.showModal();
-  $("#begin-adventure")?.addEventListener("click", () => dialog.close());
-  $("#inventory-heal")?.addEventListener("click", () => {
-    dialog.close();
-    scene.usePotion();
-    showPanel("bag");
+  render();
+  document.querySelectorAll<HTMLElement>("[data-build-tab]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        selectedBuild = el.dataset.buildTab!;
+        showPanel("party");
+      }),
+  );
+  document.querySelectorAll<HTMLElement>("[data-class]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        switchClass(save, selectedBuild, el.dataset.class as ClassId);
+        persist();
+        showPanel("party");
+      }),
+  );
+  document.querySelectorAll<HTMLElement>("[data-talent]").forEach(
+    (el) =>
+      (el.onclick = () => {
+        allocate(save, selectedBuild, el.dataset.talent as Talent);
+        persist();
+        showPanel("party");
+      }),
+  );
+  document
+    .querySelectorAll<HTMLElement>("[data-stage]")
+    .forEach(
+      (el) => (el.onclick = () => startBattle(Number(el.dataset.stage))),
+    );
+  $("#respec")?.addEventListener("click", () => {
+    respec(save, selectedBuild);
+    persist();
+    showPanel("party");
   });
+  $("#upgrade-weapon")?.addEventListener("click", () => {
+    if (upgradeWeapon(save, selectedBuild)) {
+      persist();
+      showPanel("party");
+      toast("อัปเกรดอาวุธสำเร็จ");
+    }
+  });
+  $("#apply-build")?.addEventListener("click", () => startBattle(battle.stage));
   $("#settings-sound")?.addEventListener("click", () => {
     toggleSound();
     showPanel("settings");
   });
-  $("#reset-progress")?.addEventListener("click", () => {
+  $("#buy-potion")?.addEventListener("click", () => {
+    if (buyPotions(save)) {
+      battle.potions++;
+      persist();
+      showPanel("settings");
+      toast("ได้รับยาฟื้นฟู 1 ขวด");
+    }
+  });
+  $("#reset-save")?.addEventListener("click", () => {
     $("#panel-content").innerHTML =
-      `<h2>A new beginning?</h2><p class="dialog-subtitle">This will reset Ash’s level, items and quest progress in this browser.</p><div class="reset-actions"><button class="button secondary" id="cancel-reset">Keep adventuring</button><button class="button danger" id="confirm-reset">Yes, start fresh</button></div>`;
+      '<div class="dialog-title"><h2>Begin again?</h2><p>ล้างความคืบหน้าเวอร์ชันเทิร์นเบสทั้งหมดหรือไม่?</p></div><div class="result-actions"><button class="button secondary" id="cancel-reset">เก็บตำนานเดิมไว้</button><button class="button danger" id="confirm-reset">ยืนยันเริ่มใหม่</button></div>';
     $("#cancel-reset").onclick = () => showPanel("settings");
     $("#confirm-reset").onclick = () => {
-      Object.assign(progress, freshProgress());
-      save();
-      location.reload();
+      Object.assign(save, freshTactics());
+      persist();
+      startBattle(0);
     };
   });
 }
-document
-  .querySelectorAll<HTMLElement>("[data-panel]")
-  .forEach((el) =>
-    el.addEventListener("click", () => showPanel(el.dataset.panel!)),
-  );
+function toggleSound() {
+  save.sound = !save.sound;
+  $(".sound-btn").innerHTML =
+    `${icon(save.sound ? "sound" : "mute")}<span>SOUND ${save.sound ? "ON" : "OFF"}</span>`;
+  persist();
+  if (save.sound) sound("heal");
+}
 $("#close-panel").onclick = () => dialog.close();
-dialog.addEventListener("close", () => scene.setPaused(manuallyPaused));
+dialog.addEventListener("close", () => {
+  render();
+  schedule();
+});
 dialog.addEventListener("click", (e) => {
   if (e.target === dialog) {
     const r = dialog.getBoundingClientRect();
@@ -281,76 +527,78 @@ dialog.addEventListener("click", (e) => {
       dialog.close();
   }
 });
-$("#pause").onclick = () => pause(!manuallyPaused);
-$("#resume-game").onclick = () => pause(false);
-$("#slot-sword").onclick = () => scene.attack();
-$("#slot-potion").onclick = () => scene.usePotion();
-$("#touch-attack").onclick = () => scene.attack();
-$("#touch-dash").onclick = () => scene.dash();
-$("#touch-interact").onclick = () => scene.interact();
-document.querySelectorAll<HTMLElement>("[data-hold]").forEach((el) => {
-  const release = () => {
-    scene.held.delete(el.dataset.hold!);
-    el.classList.remove("pressed");
-  };
-  el.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    el.setPointerCapture(e.pointerId);
-    scene.held.add(el.dataset.hold!);
-    el.classList.add("pressed");
-  });
-  el.addEventListener("pointerup", release);
-  el.addEventListener("pointercancel", release);
-  el.addEventListener("lostpointercapture", release);
-});
-function toggleSound() {
-  soundEnabled = !soundEnabled;
-  document.querySelectorAll(".sound-btn").forEach((el) => {
-    el.innerHTML = icon(soundEnabled ? "sound" : "mute");
-    el.setAttribute("aria-label", soundEnabled ? "Mute sound" : "Enable sound");
-  });
-  if (soundEnabled) sound("pickup");
-}
+document
+  .querySelectorAll<HTMLElement>("[data-panel]")
+  .forEach((el) => (el.onclick = () => showPanel(el.dataset.panel!)));
+document
+  .querySelectorAll<HTMLElement>("[data-action]")
+  .forEach(
+    (el) => (el.onclick = () => void act(el.dataset.action as ActionId)),
+  );
+$("#skill-toggle").onclick = () => {
+  if (isPlayerTurn()) {
+    skillOpen = !skillOpen;
+    render();
+  }
+};
+$("#boost").onclick = () => {
+  if (isPlayerTurn() && (activeFighter(battle)?.bp ?? 0) >= 2) {
+    boost = !boost;
+    render();
+  }
+};
+$("#target-prev").onclick = () => cycleTarget(-1);
+$("#target-next").onclick = () => cycleTarget(1);
+$("#auto").onclick = () => {
+  automatic = !automatic;
+  render();
+  schedule();
+};
+$("#speed").onclick = () => {
+  fast = !fast;
+  render();
+  schedule();
+};
 $(".sound-btn").onclick = toggleSound;
 $("#fullscreen").onclick = async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
-    else await $(".game-card").requestFullscreen();
+    else await $(".battle-shell").requestFullscreen();
   } catch {
-    toast("Fullscreen isn’t available here. You can still keep exploring.");
+    toast("เบราว์เซอร์นี้ไม่รองรับโหมดเต็มจอ แต่เล่นต่อได้ตามปกติ");
   }
 };
-function closeNavigation() {
-  $(".sidebar").classList.remove("mobile-open");
-  $(".mobile-menu").setAttribute("aria-expanded", "false");
-  scene.setPaused(manuallyPaused || dialog.open);
-}
-$(".mobile-menu").onclick = () => {
-  const open = $(".sidebar").classList.toggle("mobile-open");
-  $(".mobile-menu").setAttribute("aria-expanded", String(open));
-  scene.setPaused(open || manuallyPaused || dialog.open);
-};
-$(".nav-scrim").onclick = closeNavigation;
 document.addEventListener("keydown", (e) => {
-  if (e.code === "KeyI" && !dialog.open) {
-    e.preventDefault();
-    showPanel("bag");
-  }
-  if (e.code === "Escape" && !dialog.open) pause(!manuallyPaused);
-  if (e.code === "Digit1" && !dialog.open) scene.attack();
+  if (dialog.open || e.repeat) return;
+  if (e.code === "Digit1") void act("attack");
+  if (e.code === "Digit2") $("#skill-toggle").click();
+  if (e.code === "Digit3") void act("guard");
+  if (e.code === "Digit4") void act("item");
+  if (e.code === "KeyB") $("#boost").click();
+  if (e.code === "ArrowLeft") cycleTarget(-1);
+  if (e.code === "ArrowRight") cycleTarget(1);
 });
-window.addEventListener("blur", () => {
-  scene.clearInput();
-  if (scene.player && !dialog.open) pause(true);
-  save();
-});
+window.addEventListener("pagehide", persist);
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    scene.clearInput();
-    save();
+  paused = document.hidden;
+  if (paused) clearTimeout(nextTimer);
+  else {
+    render();
+    schedule();
   }
+  persist();
 });
-window.addEventListener("pagehide", save);
-// Exposed only in Vite development for functional browser tests and debugging.
+persist();
+render();
 if (import.meta.env.DEV)
-  Object.assign(window, { __pixelRebirth: { scene, progress, game } });
+  Object.assign(window, {
+    __pixelRebirth: {
+      scene,
+      game,
+      save,
+      get battle() {
+        return battle;
+      },
+      startBattle,
+    },
+  });
