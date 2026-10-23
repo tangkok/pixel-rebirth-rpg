@@ -2,6 +2,21 @@
 
 เกม 2D Pixel Art RPG ผจญภัยแบบเล่นคนเดียวบนเบราว์เซอร์ สร้างด้วย **Phaser 3 + TypeScript + Vite** รองรับเดสก์ท็อปและมือถือ ตัวละคร ฉาก ไอเทม และเสียงสร้างขึ้นสำหรับโปรเจกต์นี้เอง ไม่ใช้ Asset จาก Roblox หรือ Pixel Lineage
 
+## เล่นจากโทรศัพท์ผ่านลิงก์เว็บ
+
+ผู้เล่นไม่ต้องติดตั้ง Node.js หรือรัน Terminal บนโทรศัพท์ เปิดเว็บเกมผ่าน Chrome หรือ Safari แล้วเล่นด้วยปุ่มสัมผัสได้เลย แต่ต้องเผยแพร่เว็บก่อน: การรันใน Cloud workspace หรือการ commit โค้ดยังไม่ทำให้เกิดลิงก์สาธารณะ
+
+เตรียม workflow สำหรับ GitHub Pages ไว้ที่ `.github/workflows/pages.yml` แล้ว ผู้ดูแล Repository เปิดใช้งานครั้งเดียวได้ผ่านเว็บ GitHub บนโทรศัพท์:
+
+1. นำโค้ดเวอร์ชันนี้ขึ้น branch `main` ของ `tangkok/pixel-rebirth-rpg`
+2. เปิด Repository → **Settings → Pages** แล้วเลือก **Source: GitHub Actions** หากไม่เห็นเมนู ให้ลองเปิดโหมด Desktop site ของเบราว์เซอร์
+3. เปิด **Actions → Publish browser game → Run workflow** เลือก branch `main`
+4. รอให้ทั้ง `build` และ `deploy` สำเร็จ แล้วเปิดลิงก์ใน deployment ชื่อ **github-pages** ด้วย Chrome หรือ Safari บนโทรศัพท์
+
+Workflow ตรวจ unit tests และ production build ก่อนเผยแพร่ ทุกครั้งที่ push โค้ดขึ้น `main` หลังจากนั้นจะอัปเดตเกมให้เอง ลิงก์จะใช้งานได้เมื่อ GitHub ยืนยัน deployment สำเร็จเท่านั้น ในบัญชีที่ใช้ GitHub Free อาจต้องเป็น Repository แบบ public; ไม่ต้องเปลี่ยนความเป็นส่วนตัวของ Repository โดยอัตโนมัติ
+
+ตัวเกมใช้ URL ของ Asset แบบ relative จึงรองรับการอยู่ใต้ path ของ Repository บน GitHub Pages และ static hosting อื่น
+
 ## เริ่มเล่น / พัฒนา
 
 ต้องมี Node.js 22.12+ หรือ 24+ และ npm
