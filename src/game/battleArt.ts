@@ -416,13 +416,13 @@ function unpackHeroSheet(sheet: HTMLImageElement) {
     });
     illustrated.set(
       f.id,
-      surface(96, 144, (c) => {
+      surface(384, 576, (c) => {
         c.imageSmoothingEnabled = true;
-        const scale = Math.min(96 / f.w, 144 / f.h);
+        const scale = Math.min(384 / f.w, 576 / f.h);
         c.drawImage(
           cut,
-          (96 - f.w * scale) / 2,
-          144 - f.h * scale,
+          (384 - f.w * scale) / 2,
+          576 - f.h * scale,
           f.w * scale,
           f.h * scale,
         );
@@ -431,9 +431,9 @@ function unpackHeroSheet(sheet: HTMLImageElement) {
     const [x, y, w, h] = f.portrait;
     illustratedPortraits.set(
       f.id,
-      surface(96, 96, (c) => {
+      surface(192, 192, (c) => {
         c.imageSmoothingEnabled = true;
-        c.drawImage(sheet, x, y, w, h, 0, 0, 96, 96);
+        c.drawImage(sheet, x, y, w, h, 0, 0, 192, 192);
       }).toDataURL(),
     );
   }
@@ -443,6 +443,65 @@ export function createBattleArt(scene: Phaser.Scene) {
     unpackHeroSheet(
       scene.textures.get("hero-sheet").getSourceImage() as HTMLImageElement,
     );
+  if (scene.textures.exists("enemy-sheet")) {
+    const sheet = scene.textures
+      .get("enemy-sheet")
+      .getSourceImage() as HTMLImageElement;
+    const frames = [
+      {
+        id: "sentinel",
+        x: 160,
+        y: 0,
+        w: 730,
+        h: 535,
+        mask: [
+          160, 0, 890, 0, 890, 300, 860, 350, 780, 430, 720, 535, 160, 535,
+        ],
+      },
+      {
+        id: "wisp",
+        x: 810,
+        y: 0,
+        w: 726,
+        h: 540,
+        mask: [930, 0, 1536, 0, 1536, 540, 810, 540, 810, 410, 930, 300],
+      },
+      {
+        id: "dragon",
+        x: 0,
+        y: 530,
+        w: 880,
+        h: 494,
+        mask: [
+          0, 530, 810, 530, 830, 650, 830, 850, 880, 910, 880, 1024, 0, 1024,
+        ],
+      },
+      {
+        id: "thorn",
+        x: 840,
+        y: 540,
+        w: 696,
+        h: 484,
+        mask: [900, 540, 1536, 540, 1536, 1024, 900, 1024, 900, 850, 840, 750],
+      },
+    ];
+    for (const f of frames)
+      illustrated.set(
+        f.id,
+        surface(f.w, f.h, (c) => {
+          c.save();
+          c.translate(-f.x, -f.y);
+          c.beginPath();
+          c.moveTo(f.mask[0], f.mask[1]);
+          for (let i = 2; i < f.mask.length; i += 2)
+            c.lineTo(f.mask[i], f.mask[i + 1]);
+          c.closePath();
+          c.clip();
+          c.drawImage(sheet, 0, 0);
+          c.restore();
+        }),
+      );
+  }
   for (const key of [
     "warden",
     "arcanist",
@@ -455,6 +514,6 @@ export function createBattleArt(scene: Phaser.Scene) {
     scene.textures.addCanvas(`battle-${key}`, fighterArt(key));
     scene.textures
       .get(`battle-${key}`)
-      .setFilter(Phaser.Textures.FilterMode.NEAREST);
+      .setFilter(Phaser.Textures.FilterMode.LINEAR);
   }
 }

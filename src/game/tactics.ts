@@ -9,7 +9,7 @@ export interface Build {
   upgraded: boolean;
 }
 export interface TacticsSave {
-  version: 2;
+  version: 3;
   level: number;
   xp: number;
   gold: number;
@@ -53,7 +53,8 @@ export interface CombatEvent {
   amount: number;
   element: string;
 }
-export const TACTICS_KEY = "pixel-rebirth-tactics-v2";
+export const PARTY_KEY = "pixel-rebirth-tactics-v2";
+export const TACTICS_KEY = "pixel-rebirth-solo-v3";
 export const CLASSES: Record<
   ClassId,
   {
@@ -84,7 +85,7 @@ export const CLASSES: Record<
     thai: "จอมเวทดวงดาว",
     role: "ARCANIST",
     skill: "Astral Rain",
-    description: "เวทหมู่รุนแรง พร้อมฟื้นฟูพลังให้เพื่อนร่วมทีม",
+    description: "เวทดวงดาวรุนแรง พร้อมเวทฟื้นฟูพลังให้ตัวเอง",
     color: "#83d9de",
     weapon: "Lunar staff",
     upgrade: "Celestial scepter",
@@ -131,7 +132,7 @@ export const STAGES = [
 ] as const;
 const zeroTalents = () => ({ might: 0, vitality: 0, spirit: 0, haste: 0 });
 export const freshTactics = (): TacticsSave => ({
-  version: 2,
+  version: 3,
   level: 1,
   xp: 0,
   gold: 150,
@@ -142,33 +143,20 @@ export const freshTactics = (): TacticsSave => ({
   builds: [
     {
       id: "ash",
-      name: "Ash",
+      name: "ผู้เดินทาง",
       classId: "warden",
-      talents: zeroTalents(),
-      upgraded: false,
-    },
-    {
-      id: "lyra",
-      name: "Lyra",
-      classId: "arcanist",
-      talents: zeroTalents(),
-      upgraded: false,
-    },
-    {
-      id: "kael",
-      name: "Kael",
-      classId: "ranger",
       talents: zeroTalents(),
       upgraded: false,
     },
   ],
 });
-export const totalPoints = (s: TacticsSave) => 3 + (s.level - 1) * 2;
+export const totalPoints = (s: Pick<TacticsSave, "level">) =>
+  3 + (s.level - 1) * 2;
 export const usedPoints = (b: Build) =>
   Object.values(b.talents).reduce((a, b) => a + b, 0);
 export const pointsLeft = (s: TacticsSave, b: Build) =>
   totalPoints(s) - usedPoints(b);
-export const requiredXp = (s: TacticsSave) => 80 + s.level * 30;
+export const requiredXp = (s: Pick<TacticsSave, "level">) => 80 + s.level * 30;
 export function allocate(s: TacticsSave, id: string, talent: Talent): boolean {
   const b = s.builds.find((b) => b.id === id);
   if (!b || !(talent in b.talents) || pointsLeft(s, b) < 1) return false;
@@ -207,9 +195,9 @@ export function buyPotions(s: TacticsSave): boolean {
 }
 export function stats(b: Build, level: number): Fighter {
   const base = {
-    warden: [180, 42, 31, 20, 14, 18],
-    arcanist: [128, 76, 19, 37, 8, 23],
-    ranger: [145, 54, 29, 24, 10, 31],
+    warden: [240, 66, 40, 25, 17, 22],
+    arcanist: [190, 90, 25, 48, 12, 24],
+    ranger: [210, 72, 39, 30, 13, 31],
   }[b.classId];
   const hp = base[0] + (level - 1) * 18 + b.talents.vitality * 18,
     mp = base[1] + (level - 1) * 4 + b.talents.spirit * 6;
@@ -264,22 +252,11 @@ export function beginBattle(save: TacticsSave, stage = 0): Battle {
   const n = Math.max(0, Math.min(stage, save.unlocked, 2));
   const enemies =
     n === 0
-      ? [
-          foe("sentinel", "Hollow Sentinel", "sentinel", 155, 20, 14, 16),
-          foe("wisp", "Astral Wisp", "wisp", 74, 16, 5, 21),
-          foe("thorn", "Thornling", "thorn", 96, 18, 8, 14),
-        ]
+      ? [foe("sentinel", "Hollow Sentinel", "sentinel", 155, 20, 10, 16)]
       : n === 1
-        ? [
-            foe("sentinel", "Archive Keeper", "sentinel", 210, 26, 18, 19),
-            foe("wisp", "Dusk Oracle", "wisp", 115, 23, 8, 29),
-            foe("thorn", "Briar Watcher", "thorn", 140, 25, 12, 22),
-          ]
-        : [
-            foe("dragon", "Eclipse Sovereign", "dragon", 620, 40, 24, 25),
-            foe("wisp", "Eclipse Wisp", "wisp", 120, 27, 9, 30),
-          ];
-  const actors = [...save.builds.map((b) => stats(b, save.level)), ...enemies];
+        ? [foe("wisp", "Archive Wraith", "wisp", 255, 30, 10, 25)]
+        : [foe("dragon", "Eclipse Sovereign", "dragon", 480, 38, 20, 29)];
+  const actors = [stats(save.builds[0], save.level), ...enemies];
   const queue = actors
     .slice()
     .sort((a, b) => b.speed - a.speed || a.id.localeCompare(b.id))
@@ -337,7 +314,7 @@ export function canAct(
     (action === "item" || action === "restore") &&
     !b.actors.some((p) => p.side === a.side && p.hp < p.maxHp)
   )
-    return "สมาชิกทุกคนมี HP เต็มแล้ว";
+    return "HP ของคุณเต็มแล้ว";
   return null;
 }
 function advance(b: Battle) {
@@ -419,7 +396,13 @@ export function performAction(
     const victims = skill && cls === "arcanist" ? targets : [target];
     for (const victim of victims) {
       const magic = skill && cls === "arcanist",
-        factor = skill ? (cls === "arcanist" ? 1.35 : 1.8) : 1;
+        factor = skill
+          ? cls === "arcanist"
+            ? targets.length === 1
+              ? 1.8
+              : 1.35
+            : 1.8
+          : 1;
       const amount = damageAmount(
         a,
         victim,
@@ -488,9 +471,11 @@ export function readTactics(
       }
       return fresh;
     }
-    const s = JSON.parse(raw) as TacticsSave;
+    const s = JSON.parse(raw) as Omit<TacticsSave, "version"> & {
+      version: number;
+    };
     if (
-      s.version !== 2 ||
+      ![2, 3].includes(s.version) ||
       !Number.isInteger(s.level) ||
       s.level < 1 ||
       s.level > 100 ||
@@ -508,15 +493,15 @@ export function readTactics(
       !Array.isArray(s.cleared) ||
       s.cleared.some((n) => !Number.isInteger(n) || n < 0 || n > 2) ||
       !Array.isArray(s.builds) ||
-      s.builds.length !== 3 ||
+      s.builds.length !== (s.version === 2 ? 3 : 1) ||
       typeof s.sound !== "boolean"
     )
       return fresh;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < s.builds.length; i++) {
       const b = s.builds[i];
       if (
         !b ||
-        b.id !== fresh.builds[i].id ||
+        b.id !== ["ash", "lyra", "kael"][i] ||
         !Object.hasOwn(CLASSES, b.classId) ||
         typeof b.upgraded !== "boolean" ||
         !b.talents ||
@@ -529,10 +514,31 @@ export function readTactics(
         usedPoints(b) > totalPoints(s)
       )
         return fresh;
-      b.name = fresh.builds[i].name;
+      b.name = cleanName(b.name);
     }
-    return s;
+    return {
+      ...s,
+      version: 3,
+      builds: [{ ...s.builds[0], upgraded: s.builds.some((b) => b.upgraded) }],
+    };
   } catch {
     return fresh;
   }
+}
+
+export function cleanName(value: unknown): string {
+  return typeof value === "string"
+    ? Array.from(
+        value
+          .normalize("NFC")
+          .replace(/[^\p{L}\p{M}\p{N} ._-]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
+        .slice(0, 20)
+        .join("") || "ผู้เดินทาง"
+    : "ผู้เดินทาง";
+}
+export function renameHero(save: TacticsSave, name: string): void {
+  save.builds[0].name = cleanName(name);
 }

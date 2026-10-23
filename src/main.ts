@@ -8,6 +8,7 @@ import "./style.css";
 import { icon } from "./icons";
 import { fighterArt, portraitArt } from "./game/battleArt";
 import { BattleScene } from "./game/BattleScene";
+import { renderSize } from "./game/display";
 import {
   activeFighter,
   allocate,
@@ -28,6 +29,8 @@ import {
   STAGES,
   switchClass,
   TACTICS_KEY,
+  PARTY_KEY,
+  renameHero,
   upgradeWeapon,
   type ActionId,
   type Battle,
@@ -46,7 +49,10 @@ function read(key: string) {
     return null;
   }
 }
-const save = readTactics(read(TACTICS_KEY), read("pixel-rebirth-save-v1"));
+const save = readTactics(
+  read(TACTICS_KEY) ?? read(PARTY_KEY),
+  read("pixel-rebirth-save-v1"),
+);
 const portraits = Object.fromEntries(
   Object.keys(CLASSES).map((k) => [k, portraitArt(k as ClassId)]),
 );
@@ -74,7 +80,7 @@ let reward: { gold: number; xp: number; leveled: boolean } | null = null;
 document.querySelector("#app")!.innerHTML = `
 <header class="topbar">
   <a class="brand" href="./" aria-label="Pixel Rebirth"><span class="brand-rune">✦</span><span>PIXEL <b>REBIRTH</b><small>A NEW LEGACY</small></span><em>HD·2D</em></a>
-  <nav aria-label="Main navigation"><button class="nav-link active" data-panel="adventure">${icon("compass")}<span>Adventure</span></button><button class="nav-link" data-panel="party">${icon("person")}<span>Party & builds</span></button><button class="nav-link" data-panel="codex">${icon("book")}<span>Codex</span></button></nav>
+  <nav aria-label="Main navigation"><button class="nav-link active" data-panel="adventure">${icon("compass")}<span>Adventure</span></button><button class="nav-link" data-panel="party">${icon("person")}<span>ตัวละครของฉัน</span></button><button class="nav-link" data-panel="codex">${icon("book")}<span>Codex</span></button></nav>
   <div class="topbar-tools"><span class="gold-counter"><i>◆</i><b id="gold-value">150</b><small>G</small></span><span class="account-level">LV. <b id="level-value">1</b></span><button class="icon-btn" data-panel="settings" aria-label="Settings / ตั้งค่า">${icon("settings")}</button></div>
 </header>
 <main class="battle-shell">
@@ -89,8 +95,8 @@ document.querySelector("#app")!.innerHTML = `
     <div id="loading"><div class="loading-rune">✧</div><h2>The sanctuary awakens.</h2><p>กำลังเตรียมการผจญภัยของคุณ…</p></div>
   </section>
   <section class="battle-hud" aria-label="Battle controls">
-    <div class="party-panel"><div class="panel-heading"><span class="micro-label"><i></i> YOUR PARTY <b id="party-alive">3 / 3</b></span><button class="text-button" data-panel="party">จัดบิลด์ตัวละคร ${icon("arrowUp")}</button></div><div class="party-cards" id="party-cards"></div><div class="battle-log"><span class="log-icon">✧</span><p id="combat-log">แสงผลึกส่องนำทาง — การต่อสู้เริ่มขึ้น</p><button data-panel="log" aria-label="Battle log">${icon("book")}</button></div></div>
-    <div class="command-panel"><div class="command-top"><div><span class="micro-label" id="turn-label">YOUR TURN</span><strong id="actor-name">Kael<span> / VEIL RANGER</span></strong></div><button id="boost" class="boost-button" aria-pressed="false">${icon("bolt")} BOOST <small>2 BP</small></button></div><div class="target-row"><span>TARGET</span><button id="target-prev" aria-label="Previous target">${icon("chevron")}</button><b id="target-name">Hollow Sentinel</b><button id="target-next" aria-label="Next target">${icon("chevron")}</button></div><div id="skill-menu" class="skill-menu" hidden></div><div class="command-grid"><button data-action="attack" class="command attack" aria-label="Attack / โจมตี"><span class="command-icon">${icon("sword")}</span><span><b>โจมตี</b><small>Attack</small></span><kbd>1</kbd></button><button id="skill-toggle" class="command" aria-label="Skills / ทักษะ" aria-expanded="false"><span class="command-icon">${icon("spark")}</span><span><b>ทักษะ</b><small>Skills</small></span><kbd>2</kbd></button><button data-action="guard" class="command" aria-label="Guard / ป้องกัน"><span class="command-icon">${icon("heart")}</span><span><b>ป้องกัน</b><small>Guard · +BP</small></span><kbd>3</kbd></button><button data-action="item" class="command" aria-label="Potion / ใช้ยา"><span class="command-icon">${icon("potion")}</span><span><b>ใช้ไอเทม</b><small>Healing potion <em id="potion-count">×5</em></small></span><kbd>4</kbd></button></div><div class="command-footer"><i></i><span id="command-hint">เลือกคำสั่งเมื่อพร้อม</span><span class="turn-based-tag">TURN-BASED</span></div></div>
+    <div class="party-panel"><div class="panel-heading"><span class="micro-label"><i></i> YOUR CHARACTER <b id="party-alive">SOLO</b></span><button class="text-button" data-panel="party">ปั้นตัวละครของฉัน ${icon("arrowUp")}</button></div><div class="party-cards" id="party-cards"></div><div class="battle-log"><span class="log-icon">✧</span><p id="combat-log">แสงผลึกส่องนำทาง — การต่อสู้เริ่มขึ้น</p><button data-panel="log" aria-label="Battle log">${icon("book")}</button></div></div>
+    <div class="command-panel"><div class="command-top"><div><span class="micro-label" id="turn-label">YOUR TURN</span><strong id="actor-name">ผู้เดินทาง<span> / DAWN WARDEN</span></strong></div><button id="boost" class="boost-button" aria-pressed="false">${icon("bolt")} BOOST <small>2 BP</small></button></div><div class="target-row"><span>TARGET</span><button id="target-prev" aria-label="Previous target">${icon("chevron")}</button><b id="target-name">Hollow Sentinel</b><button id="target-next" aria-label="Next target">${icon("chevron")}</button></div><div id="skill-menu" class="skill-menu" hidden></div><div class="command-grid"><button data-action="attack" class="command attack" aria-label="Attack / โจมตี"><span class="command-icon">${icon("sword")}</span><span><b>โจมตี</b><small>Attack</small></span><kbd>1</kbd></button><button id="skill-toggle" class="command" aria-label="Skills / ทักษะ" aria-expanded="false"><span class="command-icon">${icon("spark")}</span><span><b>ทักษะ</b><small>Skills</small></span><kbd>2</kbd></button><button data-action="guard" class="command" aria-label="Guard / ป้องกัน"><span class="command-icon">${icon("heart")}</span><span><b>ป้องกัน</b><small>Guard · +BP</small></span><kbd>3</kbd></button><button data-action="item" class="command" aria-label="Potion / ใช้ยา"><span class="command-icon">${icon("potion")}</span><span><b>ใช้ไอเทม</b><small>Healing potion <em id="potion-count">×5</em></small></span><kbd>4</kbd></button></div><div class="command-footer"><i></i><span id="command-hint">เลือกคำสั่งเมื่อพร้อม</span><span class="turn-based-tag">TURN-BASED</span></div></div>
   </section>
 </main>
 <footer class="bottom-bar"><span><i></i> <b id="save-status">PROGRESS SAVED</b><span class="footer-divider">/</span> ORIGINAL WORLD. YOUR LEGACY.</span><span>เลือกเส้นทางของคุณ แล้วสร้างตำนานบทใหม่ <em>✧</em></span><button class="sound-btn" aria-label="Toggle sound">${icon(save.sound ? "sound" : "mute")}<span>SOUND ${save.sound ? "ON" : "OFF"}</span></button></footer>
@@ -151,35 +157,69 @@ function sound(kind: string) {
     save.sound = false;
   }
 }
-const scene = new BattleScene({
-  ready: () => {
-    ready = true;
-    for (const k of Object.keys(CLASSES))
-      portraits[k] = portraitArt(k as ClassId);
-    $("#loading").remove();
-    scene.sync(battle);
-    $("#game canvas").setAttribute(
-      "aria-label",
-      "2.5D fantasy turn-based battle arena",
-    );
-    render();
-    schedule();
+const initialRender = renderSize(
+  $("#game").clientWidth,
+  $("#game").clientHeight,
+  window.devicePixelRatio,
+);
+const scene = new BattleScene(
+  {
+    ready: () => {
+      ready = true;
+      for (const k of Object.keys(CLASSES))
+        portraits[k] = portraitArt(k as ClassId);
+      for (const k of ["sentinel", "wisp", "thorn", "dragon"])
+        enemies[k] = fighterArt(k).toDataURL();
+      $("#loading").remove();
+      scene.sync(battle);
+      $("#game canvas").setAttribute(
+        "aria-label",
+        "2.5D fantasy turn-based battle arena",
+      );
+      render();
+      schedule();
+    },
+    select: (id) => {
+      selected = id;
+      render();
+    },
   },
-  select: (id) => {
-    selected = id;
-    render();
-  },
-});
+  initialRender.density,
+);
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
   backgroundColor: "#0b1822",
   transparent: false,
-  scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
+  scale: {
+    mode: Phaser.Scale.NONE,
+    width: initialRender.bufferWidth,
+    height: initialRender.bufferHeight,
+    zoom: 1 / initialRender.density,
+  },
   scene: [scene],
   audio: { noAudio: true },
   render: { antialias: true, powerPreference: "low-power" },
   input: { activePointers: 3 },
+});
+const resizeCanvas = () => {
+  const size = renderSize(
+    $("#game").clientWidth,
+    $("#game").clientHeight,
+    window.devicePixelRatio,
+  );
+  scene.setRenderDensity(size.density);
+  game.scale.setZoom(1 / size.density);
+  game.scale.resize(size.bufferWidth, size.bufferHeight);
+  game.canvas.style.width = `${size.width}px`;
+  game.canvas.style.height = `${size.height}px`;
+};
+const resizeObserver = new ResizeObserver(() => {
+  if (ready) resizeCanvas();
+});
+resizeObserver.observe($("#game"));
+window.addEventListener("resize", () => {
+  if (ready) resizeCanvas();
 });
 function isPlayerTurn() {
   return (
@@ -217,12 +257,14 @@ function render() {
         : "";
     })
     .join("");
-  $("#party-alive").textContent = `${living(battle, "party").length} / 3`;
+  $("#party-alive").textContent = living(battle, "party").length
+    ? "SOLO HERO"
+    : "FALLEN";
   $("#party-cards").innerHTML = battle.actors
     .filter((a) => a.side === "party")
     .map(
       (a) =>
-        `<button class="party-card ${actor?.id === a.id ? "active" : ""} ${a.hp <= 0 ? "fallen" : ""}" data-build="${a.id}" aria-label="Build ${a.name}"><div class="hero-portrait"><img class="pixel-art" src="${portraits[a.classId]}" alt=""/><span>${CLASSES[a.classId as ClassId].role[0]}</span></div><div class="hero-card-main"><div class="hero-card-name"><strong>${a.name}</strong><span>LV ${save.level}</span></div><span class="hero-class">${CLASSES[a.classId as ClassId].name}</span><div class="hero-meter"><span>HP</span><div><i style="width:${(a.hp / a.maxHp) * 100}%"></i></div><b>${a.hp}<small>/${a.maxHp}</small></b></div><div class="hero-meter mp"><span>MP</span><div><i style="width:${(a.mp / a.maxMp) * 100}%"></i></div><b>${a.mp}<small>/${a.maxMp}</small></b></div><div class="bp-row"><span>BP</span>${[1, 2, 3].map((n) => `<i class="${a.bp >= n ? "filled" : ""}"></i>`).join("")}${a.guarding ? "<em>GUARD</em>" : a.hp <= 0 ? "<em>DOWN</em>" : ""}</div></div></button>`,
+        `<button class="party-card ${actor?.id === a.id ? "active" : ""} ${a.hp <= 0 ? "fallen" : ""}" data-build="${a.id}" aria-label="Build ${a.name}"><div class="hero-portrait"><img class="pixel-art" src="${portraits[a.classId]}" alt=""/><span>${CLASSES[a.classId as ClassId].role[0]}</span></div><div class="hero-card-main"><div class="hero-card-name"><strong>${a.name}</strong><span>LV ${save.level}</span></div><span class="hero-class">${CLASSES[a.classId as ClassId].name}</span><div class="hero-meter"><span>HP</span><div><i style="width:${(a.hp / a.maxHp) * 100}%"></i></div><b>${a.hp}<small>/${a.maxHp}</small></b></div><div class="hero-meter mp"><span>MP</span><div><i style="width:${(a.mp / a.maxMp) * 100}%"></i></div><b>${a.mp}<small>/${a.maxMp}</small></b></div><div class="hero-xp"><span>XP</span><div><i style="width:${(save.xp / requiredXp(save)) * 100}%"></i></div><b>${save.xp} / ${requiredXp(save)}</b></div><div class="bp-row"><span>BP</span>${[1, 2, 3].map((n) => `<i class="${a.bp >= n ? "filled" : ""}"></i>`).join("")}${a.guarding ? "<em>GUARD</em>" : a.hp <= 0 ? "<em>DOWN</em>" : ""}</div></div></button>`,
     )
     .join("");
   document.querySelectorAll<HTMLElement>("[data-build]").forEach(
@@ -274,7 +316,7 @@ function render() {
   $("#skill-toggle").setAttribute("aria-expanded", String(skillOpen && player));
   if (actor?.side === "party")
     $("#skill-menu").innerHTML =
-      `<button data-skill="skill" ${actor.mp < CLASSES[actor.classId as ClassId].cost ? "disabled" : ""}><span>${icon("spark")}<b>${CLASSES[actor.classId as ClassId].skill}</b><small>${actor.classId === "arcanist" ? "โจมตีเวทศัตรูทั้งหมด" : actor.classId === "warden" ? "โจมตีหนักและทลายเกราะ" : "ลูกศรทะลุเกราะ"}</small></span><em>${CLASSES[actor.classId as ClassId].cost} MP</em></button><button data-skill="restore" ${actor.mp < 16 ? "disabled" : ""}><span>${icon("heart")}<b>Starlight Mend</b><small>ฟื้นฟูเพื่อนที่บาดเจ็บที่สุด</small></span><em>16 MP</em></button>`;
+      `<button data-skill="skill" ${actor.mp < CLASSES[actor.classId as ClassId].cost ? "disabled" : ""}><span>${icon("spark")}<b>${CLASSES[actor.classId as ClassId].skill}</b><small>${actor.classId === "arcanist" ? "โจมตีเวทศัตรูทั้งหมด" : actor.classId === "warden" ? "โจมตีหนักและทลายเกราะ" : "ลูกศรทะลุเกราะ"}</small></span><em>${CLASSES[actor.classId as ClassId].cost} MP</em></button><button data-skill="restore" ${actor.mp < 16 ? "disabled" : ""}><span>${icon("heart")}<b>Starlight Mend</b><small>ฟื้นฟู HP ให้ตัวคุณเอง</small></span><em>16 MP</em></button>`;
   document
     .querySelectorAll<HTMLElement>("[data-skill]")
     .forEach(
@@ -379,7 +421,7 @@ function showResult() {
   const victory = battle.phase === "victory";
   $("#result").hidden = false;
   $("#result").innerHTML =
-    `<div class="result-card"><span class="result-sigil">${victory ? "✦" : "◇"}</span><span class="eyebrow">${victory ? "THE LIGHT REMAINS" : "YOUR LEGACY CONTINUES"}</span><h2>${victory ? "Victory" : "Rise again"}</h2><p>${victory ? "อีกหนึ่งบทของตำนานที่คุณเป็นผู้เขียน" : "ความพ่ายแพ้คือจุดเริ่มต้นของบิลด์ที่แข็งแกร่งกว่า"}</p>${victory ? `<div class="rewards"><span><b>+${reward?.gold ?? 0}</b> GOLD</span><span><b>+${reward?.xp ?? 0}</b> XP</span>${reward?.leveled ? `<span><b>LEVEL ${save.level}</b> +2 TALENT POINTS</span>` : ""}</div>` : ""}<div class="result-actions"><button class="button primary" id="next-battle">${victory && battle.stage < 2 ? "ด่านถัดไป" : "เริ่มการต่อสู้อีกครั้ง"} ${icon("arrow")}</button><button class="button secondary" id="result-build">จัดบิลด์ตัวละคร</button></div><button class="text-button" id="result-expeditions">เลือกด่านการเดินทาง ${icon("compass")}</button></div>`;
+    `<div class="result-card"><span class="result-sigil">${victory ? "✦" : "◇"}</span><span class="eyebrow">${victory ? "THE LIGHT REMAINS" : "YOUR LEGACY CONTINUES"}</span><h2>${victory ? "Victory" : "Rise again"}</h2><p>${victory ? "อีกหนึ่งบทของตำนานที่คุณเป็นผู้เขียน" : "ความพ่ายแพ้คือจุดเริ่มต้นของบิลด์ที่แข็งแกร่งกว่า"}</p>${victory ? `<div class="rewards"><span><b>+${reward?.gold ?? 0}</b> GOLD</span><span><b>+${reward?.xp ?? 0}</b> XP</span>${reward?.leveled ? `<span><b>LEVEL ${save.level}</b> +2 TALENT POINTS</span>` : ""}</div>` : ""}<div class="result-actions"><button class="button primary" id="next-battle">${victory && battle.stage < 2 ? "ด่านถัดไป" : "เริ่มการต่อสู้อีกครั้ง"} ${icon("arrow")}</button><button class="button secondary" id="result-build">ปั้นตัวละครของฉัน</button></div><button class="text-button" id="result-expeditions">เลือกด่านการเดินทาง ${icon("compass")}</button></div>`;
   $("#next-battle").onclick = () =>
     startBattle(victory ? Math.min(2, battle.stage + 1) : battle.stage);
   $("#result-build").onclick = () => showPanel("party");
@@ -400,7 +442,7 @@ function showPanel(key: string) {
     const b = save.builds.find((b) => b.id === selectedBuild) ?? save.builds[0],
       a = stats(b, save.level),
       cls = CLASSES[b.classId];
-    html = `<div class="dialog-title"><span class="eyebrow">YOUR PARTY. YOUR PLAYSTYLE.</span><h2>Forge your legacy<span>.</span></h2><p>เลือกอาชีพ ลงแต้ม และสร้างบิลด์ที่เป็นของคุณ</p></div><div class="build-tabs">${save.builds.map((b) => `<button data-build-tab="${b.id}" class="${b.id === selectedBuild ? "selected" : ""}"><img src="${portraits[b.classId]}" class="pixel-art" alt=""/>${b.name}<small>${CLASSES[b.classId].role}</small></button>`).join("")}</div><div class="build-sheet"><div class="build-preview"><div class="character-aura"></div><img class="pixel-art" src="${fighterArt(b.classId).toDataURL()}" alt="${b.name} ${cls.name}"/><span>${b.name}</span><small>LEVEL ${save.level}</small></div><div class="build-info"><div class="build-class-name"><span class="eyebrow">${cls.role}</span><h3>${cls.name}</h3><p>${cls.description}</p></div><div class="class-selector">${Object.entries(
+    html = `<div class="dialog-title"><span class="eyebrow">YOUR CHARACTER. YOUR LEGACY.</span><h2>Forge your legacy<span>.</span></h2><p>ตัวละครของคุณคนเดียว เลือกอาชีพ ลงแต้ม และเติบโตในแบบของคุณ</p></div><form class="hero-name-form" id="hero-name-form"><label for="hero-name-input">ชื่อตัวละครของคุณ</label><input id="hero-name-input" name="heroName" maxlength="20" value="${b.name}" autocomplete="off" required/><button class="button secondary" type="submit">บันทึกชื่อ</button></form><div class="build-sheet"><div class="build-preview"><div class="character-aura"></div><img class="pixel-art" src="${fighterArt(b.classId).toDataURL()}" alt="${b.name} ${cls.name}"/><span>${b.name}</span><small>LEVEL ${save.level}</small></div><div class="build-info"><div class="build-class-name"><span class="eyebrow">${cls.role}</span><h3>${cls.name}</h3><p>${cls.description}</p></div><div class="class-selector">${Object.entries(
       CLASSES,
     )
       .map(
@@ -428,14 +470,14 @@ function showPanel(key: string) {
   if (key === "adventure")
     html = `<div class="dialog-title"><span class="eyebrow">A WORLD WAITING TO BE REMEMBERED</span><h2>Choose your chapter<span>.</span></h2><p>ฟื้นแสงแห่งผลึก เดินทางผ่าน 3 บท และเผชิญราชันแห่งคราส</p></div><div class="expedition-grid">${STAGES.map((s, i) => `<button class="expedition-card stage-${i} ${i > save.unlocked ? "locked" : ""}" data-stage="${i}" ${i > save.unlocked ? "disabled" : ""}><span class="expedition-number">0${i + 1}</span><div><span class="eyebrow">${save.cleared.includes(i) ? "COMPLETED" : i > save.unlocked ? "LOCKED" : "READY TO EXPLORE"}</span><h3>${s.name}</h3><p>${s.thai}</p><small>${s.description}</small><strong>${s.reward} G <i>·</i> ${s.xp} XP ${icon(i > save.unlocked ? "settings" : "arrow")}</strong></div></button>`).join("")}</div><p class="dialog-note">เลือกด่านที่ปลดล็อกเพื่อเริ่มการต่อสู้ใหม่ เล่นซ้ำเพื่อเก็บเลเวลและเงินได้</p>`;
   if (key === "codex" || key === "help")
-    html = `<div class="dialog-title"><span class="eyebrow">THE TRAVELER'S CODEX</span><h2>A little strategy. A lasting legend<span>.</span></h2><p>ทุกคำสั่งสร้างความแตกต่าง — ค่อย ๆ เลือกได้ ไม่มีเวลาจำกัด</p></div><div class="codex-grid"><article>${icon("compass")}<h3>ลำดับเทิร์น</h3><p>ตัวละครที่มี SPD สูงจะได้ลงมือก่อน ดูลำดับจากแถบด้านบน ศัตรูจะโจมตีเมื่อถึงเทิร์นของมัน</p></article><article>${icon("bolt")}<h3>Boost · 2 BP</h3><p>แตะ BOOST ก่อนเลือกคำสั่งเพื่อเพิ่มพลัง 65% ทุกคำสั่งเพิ่ม BP 1 แต้ม การป้องกันเพิ่มได้อีก 1 แต้ม สูงสุด 3</p></article><article>${icon("sword")}<h3>บิลด์และอาชีพ</h3><p>Dawn Warden ทลายเกราะ · Starweaver ใช้เวทหมู่ · Veil Ranger ยิงทะลุเกราะ ปรับอาชีพและแต้มได้ใน Party & builds</p></article><article>${icon("heart")}<h3>ป้องกันและฟื้นฟู</h3><p>Guard ลดความเสียหาย 55% จนถึงเทิร์นถัดไปพร้อมคืน 8 MP ยาฟื้น 90 HP และ Starlight Mend ฟื้นฟูเพื่อนที่บาดเจ็บที่สุด รวมถึงเพื่อนที่ล้มลง</p></article></div><div class="help-keys"><span><kbd>1</kbd> โจมตี</span><span><kbd>2</kbd> ทักษะ</span><span><kbd>3</kbd> ป้องกัน</span><span><kbd>4</kbd> ยา</span><span><kbd>B</kbd> บูสต์</span></div><p class="dialog-note">บนโทรศัพท์แตะคำสั่งได้โดยตรง แตะศัตรูหรือใช้ลูกศร TARGET เพื่อเลือกเป้าหมาย แตะการ์ดสมาชิกเพื่อจัดบิลด์ เกมเซฟอัตโนมัติในเบราว์เซอร์นี้</p>`;
+    html = `<div class="dialog-title"><span class="eyebrow">THE TRAVELER'S CODEX</span><h2>A little strategy. A lasting legend<span>.</span></h2><p>ทุกคำสั่งสร้างความแตกต่าง — ค่อย ๆ เลือกได้ ไม่มีเวลาจำกัด</p></div><div class="codex-grid"><article>${icon("compass")}<h3>ลำดับเทิร์น</h3><p>ตัวละครที่มี SPD สูงจะได้ลงมือก่อน ดูลำดับจากแถบด้านบน ศัตรูจะโจมตีเมื่อถึงเทิร์นของมัน</p></article><article>${icon("bolt")}<h3>Boost · 2 BP</h3><p>แตะ BOOST ก่อนเลือกคำสั่งเพื่อเพิ่มพลัง 65% ทุกคำสั่งเพิ่ม BP 1 แต้ม การป้องกันเพิ่มได้อีก 1 แต้ม สูงสุด 3</p></article><article>${icon("sword")}<h3>บิลด์และอาชีพ</h3><p>Dawn Warden ทลายเกราะ · Starweaver ใช้เวทดวงดาว · Veil Ranger ยิงทะลุเกราะ ปรับอาชีพและแต้มได้ในตัวละครของฉัน</p></article><article>${icon("heart")}<h3>ป้องกันและฟื้นฟู</h3><p>Guard ลดความเสียหาย 55% จนถึงเทิร์นถัดไปพร้อมคืน 8 MP ยาฟื้น 90 HP และ Starlight Mend ฟื้นฟู HP ให้ตัวคุณเอง ใช้ได้กับตัวคุณเอง</p></article></div><div class="help-keys"><span><kbd>1</kbd> โจมตี</span><span><kbd>2</kbd> ทักษะ</span><span><kbd>3</kbd> ป้องกัน</span><span><kbd>4</kbd> ยา</span><span><kbd>B</kbd> บูสต์</span></div><p class="dialog-note">บนโทรศัพท์แตะคำสั่งได้โดยตรง แตะศัตรูหรือใช้ลูกศร TARGET เพื่อเลือกเป้าหมาย แตะการ์ดตัวละครของคุณเพื่อจัดบิลด์ เกมเซฟอัตโนมัติในเบราว์เซอร์นี้</p>`;
   if (key === "log")
     html = `<div class="dialog-title"><span class="eyebrow">EVERY MOVE TELLS A STORY</span><h2>Battle chronicle<span>.</span></h2></div><div class="chronicle">${battle.log
       .filter((l) => l !== "REWARDS_CLAIMED")
       .map((l) => `<p>${icon("spark")}${l}</p>`)
       .join("")}</div>`;
   if (key === "settings")
-    html = `<div class="dialog-title"><span class="eyebrow">MAKE THE JOURNEY YOURS</span><h2>A moment of quiet<span>.</span></h2></div><div class="setting-row"><div><h3>เสียงเกม</h3><p>เสียงการโจมตี เวทมนตร์ และชัยชนะ</p></div><button class="toggle ${save.sound ? "on" : ""}" id="settings-sound" aria-label="Toggle game sound" aria-pressed="${save.sound}"><i></i></button></div><div class="setting-row"><div><h3>การบันทึก</h3><p>${storageAvailable ? "เซฟอัตโนมัติในเบราว์เซอร์นี้" : "เบราว์เซอร์ไม่อนุญาตให้เซฟ เล่นได้ในเซสชันนี้"}</p></div><span class="tag">${storageAvailable ? "AUTO SAVE" : "SESSION ONLY"}</span></div><div class="setting-row"><div><h3>เสบียงการเดินทาง</h3><p>ยาฟื้นฟู 90 HP · มี ${save.potions} ขวด</p></div><button class="button secondary" id="buy-potion" ${save.gold < 25 ? "disabled" : ""}>ซื้อยา · 25 G</button></div><div class="setting-row"><div><h3>เริ่มตำนานใหม่</h3><p>ล้างเลเวล เงิน บิลด์ และความคืบหน้าเวอร์ชันเทิร์นเบส</p></div><button class="button danger" id="reset-save">ล้างเซฟ</button></div><p class="dialog-note">Pixel Rebirth v0.2 · Original HD·2D turn-based RPG prototype. ตัวละครวาดด้วย pixel grid ฉากต้นฉบับสร้างสำหรับเกมและจัดองค์ประกอบแบบหลายชั้น เซฟเวอร์ชันเดิมยังอยู่แยกต่างหาก</p>`;
+    html = `<div class="dialog-title"><span class="eyebrow">MAKE THE JOURNEY YOURS</span><h2>A moment of quiet<span>.</span></h2></div><div class="setting-row"><div><h3>เสียงเกม</h3><p>เสียงการโจมตี เวทมนตร์ และชัยชนะ</p></div><button class="toggle ${save.sound ? "on" : ""}" id="settings-sound" aria-label="Toggle game sound" aria-pressed="${save.sound}"><i></i></button></div><div class="setting-row"><div><h3>การบันทึก</h3><p>${storageAvailable ? "เซฟอัตโนมัติในเบราว์เซอร์นี้" : "เบราว์เซอร์ไม่อนุญาตให้เซฟ เล่นได้ในเซสชันนี้"}</p></div><span class="tag">${storageAvailable ? "AUTO SAVE" : "SESSION ONLY"}</span></div><div class="setting-row"><div><h3>เสบียงการเดินทาง</h3><p>ยาฟื้นฟู 90 HP · มี ${save.potions} ขวด</p></div><button class="button secondary" id="buy-potion" ${save.gold < 25 ? "disabled" : ""}>ซื้อยา · 25 G</button></div><div class="setting-row"><div><h3>เริ่มตำนานใหม่</h3><p>ล้างเลเวล เงิน บิลด์ และความคืบหน้าตัวละครคนเดียว</p></div><button class="button danger" id="reset-save">ล้างเซฟ</button></div><p class="dialog-note">Pixel Rebirth v0.3 · Original HD·2D turn-based RPG prototype. ตัวละครและศัตรูใช้ภาพ HD ต้นฉบับ ฉากจัดองค์ประกอบแบบหลายชั้นและเรนเดอร์ตามความละเอียดจอ เซฟเวอร์ชันปาร์ตี้เดิมยังอยู่แยกต่างหาก</p>`;
   $("#panel-content").innerHTML = html;
   if (!dialog.open) dialog.showModal();
   render();
@@ -467,6 +509,17 @@ function showPanel(key: string) {
     .forEach(
       (el) => (el.onclick = () => startBattle(Number(el.dataset.stage))),
     );
+  $("#hero-name-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#hero-name-input") as HTMLInputElement;
+    renameHero(save, input.value);
+    const actor = battle.actors.find((a) => a.side === "party");
+    if (actor) actor.name = save.builds[0].name;
+    persist();
+    scene.sync(battle);
+    showPanel("party");
+    toast("บันทึกชื่อตัวละครแล้ว");
+  });
   $("#respec")?.addEventListener("click", () => {
     respec(save, selectedBuild);
     persist();

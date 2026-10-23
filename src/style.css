@@ -3510,3 +3510,337 @@ kbd {
     padding-left: 10px;
   }
 }
+/* Solo character and retina artwork: retain detail instead of enlarging tiny sprites. */
+.pixel-art {
+  image-rendering: auto;
+}
+#game canvas {
+  image-rendering: auto;
+}
+.battle-hud {
+  grid-template-columns: minmax(320px, 520px) 368px;
+  justify-content: space-between;
+}
+.party-cards {
+  grid-template-columns: 1fr;
+}
+.party-card {
+  display: flex;
+  min-height: 164px;
+  gap: 20px;
+  padding: 18px 22px 16px 15px;
+}
+.hero-portrait {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: 80px;
+  height: 105px;
+  mask-image: none;
+  border-color: #a1bdb33b;
+}
+.hero-portrait > img {
+  width: 80px;
+  height: 105px;
+  margin: 0;
+  object-fit: cover;
+}
+.hero-portrait > span {
+  display: none;
+}
+.hero-card-name {
+  margin-left: 0;
+  min-height: 24px;
+}
+.hero-card-name > strong {
+  font-size: 22px;
+}
+.hero-card-name > span {
+  font-size: 9px;
+}
+.hero-class {
+  margin-left: 0;
+  max-width: none;
+  font-size: 10px;
+  min-height: 0;
+  margin-top: 4px;
+  margin-bottom: 16px;
+  white-space: nowrap;
+}
+.hero-meter {
+  gap: 8px;
+  margin-top: 10px;
+}
+.hero-meter > span {
+  width: 18px;
+  font-size: 8px;
+}
+.hero-meter > div {
+  height: 5px;
+}
+.hero-meter > b {
+  min-width: 65px;
+  font-size: 12px;
+}
+.hero-meter > b > small {
+  font-size: 9px;
+}
+.bp-row {
+  margin-top: 12px;
+  gap: 6px;
+}
+.bp-row > span {
+  font-size: 8px;
+  width: 20px;
+}
+.bp-row > i {
+  width: 6px;
+  height: 6px;
+}
+.bp-row > em {
+  font-size: 7px;
+}
+.hero-xp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.hero-xp > span {
+  width: 18px;
+  font-size: 8px;
+  color: #bca66e;
+}
+.hero-xp > div {
+  height: 3px;
+  flex: 1;
+  background: #07131d;
+}
+.hero-xp i {
+  display: block;
+  height: 100%;
+  background: #d3b77d;
+}
+.hero-xp > b {
+  font-size: 8px;
+  font-weight: 400;
+  color: #b9b291;
+  min-width: 65px;
+  text-align: right;
+}
+.hero-name-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0;
+  padding: 13px;
+  background: #15333c99;
+  border: 1px solid #a8b99c3d;
+  border-radius: 4px;
+}
+.hero-name-form label {
+  font-size: 11px;
+  color: #b7c6b3;
+}
+.hero-name-form input {
+  min-width: 0;
+  flex: 1;
+  width: 120px;
+  border: 1px solid #a8bc9b4d;
+  border-radius: 3px;
+  background: #0d212d;
+  color: #e8e4c9;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+}
+.hero-name-form .button {
+  font-size: 10px;
+}
+.build-preview > img {
+  width: 176px;
+  height: 250px;
+  filter: drop-shadow(0 5px 10px #0005);
+}
+.build-preview {
+  min-height: 380px;
+}
+.build-preview > span {
+  margin-top: 12px;
+}
+.build-preview:before {
+  bottom: 54px;
+}
+@media (max-width: 960px) and (min-width: 701px) {
+  .battle-hud {
+    grid-template-columns: minmax(0, 1fr) 287px;
+    gap: 17px;
+  }
+  .party-card {
+    gap: 12px;
+    padding: 14px 12px;
+  }
+  .hero-portrait {
+    width: 54px;
+    height: 78px;
+  }
+  .hero-portrait > img {
+    width: 54px;
+    height: 78px;
+  }
+  .hero-card-name > strong {
+    font-size: 17px;
+  }
+  .hero-class {
+    font-size: 8px;
+  }
+  .hero-meter > b {
+    font-size: 10px;
+    min-width: 51px;
+  }
+  .hero-meter > b > small {
+    font-size: 7px;
+  }
+  .hero-xp > b {
+    min-width: 51px;
+  }
+}
+@media (max-width: 700px) {
+  .battlefield {
+    height: clamp(350px, calc(100dvh - 425px), 520px);
+  }
+  .battle-hud {
+    display: flex;
+    gap: 7px;
+  }
+  .party-card {
+    min-height: 138px;
+    padding: 12px 14px;
+    gap: 16px;
+  }
+  .hero-portrait {
+    width: 62px;
+    height: 86px;
+  }
+  .hero-portrait > img {
+    width: 62px;
+    height: 86px;
+  }
+  .hero-card-name {
+    min-height: 21px;
+  }
+  .hero-card-name > strong {
+    font-size: 18px;
+  }
+  .hero-card-name > span {
+    display: block;
+    font-size: 8px;
+  }
+  .hero-class {
+    font-size: 9px;
+    margin-top: 2px;
+    margin-bottom: 11px;
+  }
+  .hero-meter {
+    margin-top: 8px;
+    gap: 6px;
+  }
+  .hero-meter > span {
+    font-size: 7px;
+    width: 16px;
+  }
+  .hero-meter > div {
+    height: 4px;
+  }
+  .hero-meter > b {
+    font-size: 11px;
+    min-width: 56px;
+  }
+  .hero-meter > b > small {
+    font-size: 8px;
+  }
+  .hero-xp {
+    margin-top: 10px;
+    gap: 6px;
+  }
+  .hero-xp > span {
+    font-size: 7px;
+    width: 16px;
+  }
+  .hero-xp > b {
+    font-size: 7px;
+    min-width: 56px;
+  }
+  .bp-row {
+    margin-top: 9px;
+    gap: 5px;
+  }
+  .bp-row > span {
+    font-size: 7px;
+    width: 18px;
+  }
+  .bp-row > i {
+    height: 5px;
+    width: 5px;
+  }
+  .panel-heading .micro-label {
+    font-size: 7px;
+  }
+  .panel-heading .text-button {
+    font-size: 9px;
+  }
+  .turn-order {
+    top: 109px;
+    width: 130px;
+  }
+  .turn-order:after {
+    right: 30px;
+  }
+  .battle-tools {
+    top: 114px;
+  }
+  .hero-name-form {
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 18px;
+    padding: 12px;
+  }
+  .hero-name-form label {
+    width: 100%;
+    font-size: 10px;
+  }
+  .hero-name-form input {
+    font-size: 14px;
+    padding: 9px;
+  }
+  .hero-name-form .button {
+    font-size: 9px;
+    padding: 10px;
+  }
+  .build-preview > img {
+    width: 92px;
+    height: 150px;
+  }
+  .build-preview {
+    min-height: 350px;
+  }
+  .build-preview > span {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+    padding: 0 5px;
+    text-align: center;
+  }
+  .build-preview:before {
+    bottom: 92px;
+  }
+  .build-class-name p {
+    font-size: 9px;
+  }
+  .talents strong {
+    font-size: 9px;
+  }
+  .class-selector > button > span {
+    font-size: 7px;
+  }
+}

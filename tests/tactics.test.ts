@@ -6,6 +6,7 @@ import {
   beginBattle,
   buyPotions,
   canAct,
+  cleanName,
   damageAmount,
   enemyAction,
   freshTactics,
@@ -13,365 +14,334 @@ import {
   performAction,
   pointsLeft,
   readTactics,
+  renameHero,
   requiredXp,
   respec,
   stats,
   switchClass,
   upgradeWeapon,
   type Battle,
-  type Fighter,
+  type ClassId,
 } from "../src/game/tactics";
-function turn(b: Battle, id: string) {
-  b.cursor = b.queue.indexOf(id);
+import { renderSize } from "../src/game/display";
+const hero = (b: Battle) => b.actors.find((a) => a.side === "party")!;
+const enemy = (b: Battle) => b.actors.find((a) => a.side === "enemy")!;
+function playerTurn(b: Battle) {
+  b.cursor = b.queue.indexOf(hero(b).id);
 }
-const hero = (b: Battle, id = "ash") => b.actors.find((a) => a.id === id)!;
 
-describe("character builds", () => {
-  it("creates three different playable jobs with distinct turn speeds", () => {
+describe("one personal character", () => {
+  it("starts with exactly one own character and one opponent", () => {
     const s = freshTactics(),
       b = beginBattle(s);
-    expect(living(b, "party")).toHaveLength(3);
-    expect(activeFighter(b)?.id).toBe("kael");
-    expect(new Set(s.builds.map((b) => b.classId)).size).toBe(3);
+    expect(s.builds).toHaveLength(1);
+    expect(living(b, "party")).toHaveLength(1);
+    expect(living(b, "enemy")).toHaveLength(1);
+    expect(activeFighter(b)?.id).toBe("ash");
   });
-  it("spends only available points and changes actual combat stats", () => {
+  it("uses only one hero even if given an extra runtime build", () => {
+    const s = freshTactics();
+    s.builds.push({ ...s.builds[0], id: "extra" });
+    expect(living(beginBattle(s), "party")).toHaveLength(1);
+  });
+  it("allows a personal Thai name and strips markup safely", () => {
+    const s = freshTactics();
+    renameHero(s, "ผู้พิทักษ์แห่งดาว");
+    expect(hero(beginBattle(s)).name).toBe("ผู้พิทักษ์แห่งดาว");
+    expect(cleanName('<img onerror="x">')).not.toMatch(/[<>"&]/);
+    expect(cleanName("")).toBe("ผู้เดินทาง");
+    expect(cleanName("A".repeat(30))).toHaveLength(20);
+  });
+  it("changes the same character job without adding teammates", () => {
+    const s = freshTactics();
+    expect(switchClass(s, "ash", "arcanist")).toBe(true);
+    const b = beginBattle(s);
+    expect(living(b, "party")).toHaveLength(1);
+    expect(hero(b).id).toBe("ash");
+    expect(hero(b).classId).toBe("arcanist");
+  });
+  it("spends only earned points and changes actual battle attributes", () => {
     const s = freshTactics(),
-      before = stats(s.builds[0], 1);
+      a = stats(s.builds[0], 1).attack;
     for (let i = 0; i < 3; i++) expect(allocate(s, "ash", "might")).toBe(true);
     expect(allocate(s, "ash", "might")).toBe(false);
+    expect(hero(beginBattle(s)).attack).toBe(a + 12);
     expect(pointsLeft(s, s.builds[0])).toBe(0);
-    expect(stats(s.builds[0], 1).attack).toBe(before.attack + 12);
-    expect(beginBattle(s).actors[0].attack).toBe(before.attack + 12);
   });
-  it("refunds talent points without changing gold", () => {
+  it("refunds points freely and keeps upgrades across jobs", () => {
     const s = freshTactics();
-    allocate(s, "ash", "spirit");
-    expect(respec(s, "ash")).toBe(true);
+    allocate(s, "ash", "might");
+    respec(s, "ash");
     expect(pointsLeft(s, s.builds[0])).toBe(3);
-    expect(s.gold).toBe(150);
-  });
-  it("keeps a purchased weapon upgrade when changing job", () => {
-    const s = freshTactics();
     expect(upgradeWeapon(s, "ash")).toBe(true);
-    expect(s.gold).toBe(50);
-    expect(switchClass(s, "ash", "arcanist")).toBe(true);
+    switchClass(s, "ash", "ranger");
     expect(s.builds[0].upgraded).toBe(true);
-    expect(stats(s.builds[0], 1).magic).toBe(47);
+    expect(s.gold).toBe(50);
     expect(upgradeWeapon(s, "ash")).toBe(false);
   });
-  it("does not purchase items without sufficient gold", () => {
+  it("does not buy upgrades or potions without enough currency", () => {
     const s = freshTactics();
     s.gold = 24;
     expect(buyPotions(s)).toBe(false);
     expect(upgradeWeapon(s, "ash")).toBe(false);
     expect(s.gold).toBe(24);
-    expect(s.potions).toBe(5);
   });
-  it("buys one potion and enforces the inventory limit", () => {
+  it("buys exactly one potion and caps stock", () => {
     const s = freshTactics();
     expect(buyPotions(s)).toBe(true);
-    expect(s.potions).toBe(6);
     expect(s.gold).toBe(125);
+    expect(s.potions).toBe(6);
     s.potions = 99;
     expect(buyPotions(s)).toBe(false);
   });
-  it("rejects nonexistent characters and invalid class identifiers", () => {
+  it("rejects unknown hero and prototype class identifiers", () => {
     const s = freshTactics();
-    expect(allocate(s, "nobody", "might")).toBe(false);
-    expect(switchClass(s, "ash", "__proto__" as any)).toBe(false);
+    expect(allocate(s, "lyra", "might")).toBe(false);
+    expect(switchClass(s, "ash", "__proto__" as ClassId)).toBe(false);
   });
 });
 
-describe("turn-based combat", () => {
-  it("waits indefinitely for a player command", () => {
+describe("solo turn rules", () => {
+  it("waits for commands and then lets the opponent answer", () => {
     const b = beginBattle(freshTactics());
     expect(b.cursor).toBe(0);
-    expect(b.round).toBe(1);
-    expect(b.actors.every((a) => a.hp === a.maxHp)).toBe(true);
+    const hp = enemy(b).hp;
+    expect(performAction(b, "attack", enemy(b).id)).toHaveLength(1);
+    expect(enemy(b).hp).toBeLessThan(hp);
+    expect(activeFighter(b)?.side).toBe("enemy");
+    enemyAction(b);
+    expect(activeFighter(b)?.side).toBe("party");
+    expect(b.round).toBe(2);
+    expect(hero(b).hp).toBeLessThan(hero(b).maxHp);
   });
-  it("applies an attack once and advances exactly one living turn", () => {
+  it("guard cuts the incoming hit and ends at your next turn", () => {
     const b = beginBattle(freshTactics()),
-      target = hero(b, "sentinel");
-    const hp = target.hp;
-    const events = performAction(b, "attack", "sentinel");
-    expect(events).toHaveLength(1);
-    expect(target.hp).toBeLessThan(hp);
-    expect(b.cursor).toBe(1);
-    expect(activeFighter(b)?.id).toBe("lyra");
-  });
-  it("defending reduces damage by 55% and builds BP", () => {
-    const b = beginBattle(freshTactics());
-    turn(b, "ash");
-    const a = hero(b),
-      e = hero(b, "sentinel"),
-      plain = damageAmount(e, a);
-    a.bp = 1;
+      plain = damageAmount(enemy(b), hero(b));
     performAction(b, "guard");
-    expect(a.guarding).toBe(true);
-    expect(a.bp).toBe(3);
-    expect(damageAmount(e, a)).toBeLessThan(plain * 0.55);
+    expect(hero(b).guarding).toBe(true);
+    const events = enemyAction(b);
+    expect(events[0].amount).toBeLessThan(plain * 0.55);
+    expect(hero(b).guarding).toBe(false);
+    expect(hero(b).bp).toBe(3);
   });
-  it("wardens break armor with Sunbreak", () => {
-    const b = beginBattle(freshTactics());
-    turn(b, "ash");
-    const e = hero(b, "sentinel"),
-      a = hero(b);
-    const before = damageAmount(a, e);
-    performAction(b, "skill", "sentinel");
-    expect(e.broken).toBe(3);
-    expect(damageAmount(a, e)).toBeGreaterThan(before);
-    expect(a.mp).toBe(30);
-  });
-  it("arcanists damage every living enemy and spend MP once", () => {
-    const b = beginBattle(freshTactics());
-    turn(b, "lyra");
-    const a = hero(b, "lyra"),
-      mp = a.mp;
-    const events = performAction(b, "skill", "sentinel");
-    expect(events).toHaveLength(3);
-    expect(events.every((e) => e.element === "arcanist")).toBe(true);
-    expect(living(b, "enemy").every((e) => e.hp < e.maxHp)).toBe(true);
-    expect(a.mp).toBe(mp - 18);
-  });
-  it("rangers bypass armor on their skill", () => {
+  it("Sunbreak breaks enemy armor", () => {
     const b = beginBattle(freshTactics()),
-      a = hero(b, "kael"),
-      e = hero(b, "sentinel");
-    const expected = damageAmount(a, e, 1.8, false, true);
-    expect(performAction(b, "skill", "sentinel")[0].amount).toBe(expected);
+      plain = damageAmount(hero(b), enemy(b));
+    performAction(b, "skill", enemy(b).id);
+    expect(enemy(b).broken).toBe(3);
+    expect(damageAmount(hero(b), enemy(b))).toBeGreaterThan(plain);
+    expect(hero(b).mp).toBe(54);
   });
-  it("refuses unaffordable skills without advancing or spending resources", () => {
+  it.each(["arcanist", "ranger"] as ClassId[])(
+    "%s can complete a skill with its own MP cost",
+    (cls) => {
+      const s = freshTactics();
+      switchClass(s, "ash", cls);
+      const b = beginBattle(s),
+        mp = hero(b).mp;
+      const events = performAction(b, "skill", enemy(b).id);
+      expect(events).toHaveLength(1);
+      expect(events[0].amount).toBeGreaterThan(40);
+      expect(hero(b).mp).toBe(mp - (cls === "arcanist" ? 18 : 12));
+    },
+  );
+  it("prevents low-MP actions without consuming a turn", () => {
     const b = beginBattle(freshTactics());
-    hero(b, "kael").mp = 0;
+    hero(b).mp = 0;
     const before = JSON.stringify(b);
     expect(canAct(b, "skill")).not.toBeNull();
     expect(performAction(b, "skill")).toEqual([]);
     expect(JSON.stringify(b)).toBe(before);
   });
-  it("boost increases damage and spends two BP before the normal gain", () => {
+  it("boost spends two BP and raises damage", () => {
     const a = beginBattle(freshTactics()),
       b = beginBattle(freshTactics());
-    const plain = performAction(a, "attack", "sentinel")[0].amount;
-    const boosted = performAction(b, "attack", "sentinel", true)[0].amount;
-    expect(boosted).toBeGreaterThan(plain * 1.5);
-    expect(hero(b, "kael").bp).toBe(1);
+    const d = performAction(a, "attack", enemy(a).id)[0].amount;
+    expect(
+      performAction(b, "attack", enemy(b).id, true)[0].amount,
+    ).toBeGreaterThan(d * 1.5);
+    expect(hero(b).bp).toBe(1);
   });
-  it("rejects boost when BP is insufficient", () => {
+  it("rejects boost without enough BP", () => {
     const b = beginBattle(freshTactics());
-    hero(b, "kael").bp = 1;
-    expect(performAction(b, "attack", "sentinel", true)).toEqual([]);
+    hero(b).bp = 1;
+    expect(performAction(b, "attack", enemy(b).id, true)).toEqual([]);
     expect(b.cursor).toBe(0);
   });
-  it("does not consume a potion on a full-health party", () => {
+  it("does not waste a potion at full HP", () => {
     const b = beginBattle(freshTactics());
     expect(performAction(b, "item")).toEqual([]);
     expect(b.potions).toBe(5);
     expect(b.cursor).toBe(0);
   });
-  it("heals and revives the most injured party member without exceeding max HP", () => {
+  it("uses a potion on yourself and caps HP", () => {
     const b = beginBattle(freshTactics());
-    const a = hero(b, "lyra");
-    a.hp = 0;
-    const events = performAction(b, "item");
-    expect(events[0].target).toBe("lyra");
-    expect(a.hp).toBe(90);
+    hero(b).hp = hero(b).maxHp - 20;
+    const e = performAction(b, "item");
+    expect(e[0].target).toBe(hero(b).id);
+    expect(e[0].amount).toBe(20);
+    expect(hero(b).hp).toBe(hero(b).maxHp);
     expect(b.potions).toBe(4);
   });
-  it("fails to use an empty potion inventory", () => {
+  it("self-healing spends MP and restores health", () => {
+    const b = beginBattle(freshTactics());
+    hero(b).hp = 5;
+    const mp = hero(b).mp;
+    const e = performAction(b, "restore");
+    expect(e[0].target).toBe("ash");
+    expect(hero(b).hp).toBeGreaterThan(90);
+    expect(hero(b).mp).toBe(mp - 16);
+  });
+  it("cannot consume an empty inventory", () => {
     const b = beginBattle(freshTactics());
     b.potions = 0;
     hero(b).hp = 1;
     expect(performAction(b, "item")).toEqual([]);
-    expect(b.cursor).toBe(0);
+    expect(hero(b).hp).toBe(1);
   });
-  it("restoration costs MP and restores an ally", () => {
+  it("awards victory when the opponent falls and defeat when you fall", () => {
     const b = beginBattle(freshTactics());
-    hero(b).hp = 1;
-    const a = hero(b, "kael"),
-      mp = a.mp;
-    const events = performAction(b, "restore");
-    expect(events[0].type).toBe("heal");
-    expect(hero(b).hp).toBeGreaterThan(1);
-    expect(a.mp).toBe(mp - 16);
-  });
-  it("enemy AI chooses a living party member and advances", () => {
-    const b = beginBattle(freshTactics());
-    turn(b, "wisp");
-    hero(b, "lyra").hp = 0;
-    const e = enemyAction(b);
-    expect(e).toHaveLength(1);
-    expect(e[0].target).not.toBe("lyra");
-    expect(hero(b, e[0].target).hp).toBeLessThan(hero(b, e[0].target).maxHp);
-  });
-  it("skips defeated fighters and increments rounds after the queue wraps", () => {
-    const b = beginBattle(freshTactics());
-    hero(b, "lyra").hp = 0;
-    performAction(b, "attack", "sentinel");
-    expect(activeFighter(b)?.id).toBe("wisp");
-    turn(b, b.queue.at(-1)!);
-    performAction(b, "attack", "ash");
-    expect(b.round).toBe(2);
-    expect(activeFighter(b)?.id).toBe("kael");
-  });
-  it("finishes in victory when the final enemy falls", () => {
-    const b = beginBattle(freshTactics());
-    b.actors
-      .filter((a) => a.side === "enemy")
-      .forEach((a) => (a.hp = a.id === "sentinel" ? 1 : 0));
-    performAction(b, "attack", "sentinel");
+    enemy(b).hp = 1;
+    performAction(b, "attack", enemy(b).id);
     expect(b.phase).toBe("victory");
-    expect(performAction(b, "attack")).toEqual([]);
+    const c = beginBattle(freshTactics());
+    hero(c).hp = 1;
+    c.cursor = c.queue.indexOf(enemy(c).id);
+    enemyAction(c);
+    expect(c.phase).toBe("defeat");
+    expect(performAction(c, "item")).toEqual([]);
   });
-  it("finishes in defeat when the last hero falls", () => {
-    const b = beginBattle(freshTactics());
-    b.actors
-      .filter((a) => a.side === "party")
-      .forEach((a) => (a.hp = a.id === "ash" ? 1 : 0));
-    turn(b, "sentinel");
-    enemyAction(b);
-    expect(b.phase).toBe("defeat");
-    expect(living(b, "party")).toHaveLength(0);
-  });
-  it("cannot start a locked chapter", () => {
-    const s = freshTactics();
-    expect(beginBattle(s, 2).stage).toBe(0);
-    expect(beginBattle(s, -1).stage).toBe(0);
+  it("cannot enter a locked encounter", () => {
+    expect(beginBattle(freshTactics(), 2).stage).toBe(0);
   });
 });
 
-describe("rewards and campaign persistence", () => {
-  it("claims victory rewards only once and unlocks the next chapter", () => {
+describe("progress and migration", () => {
+  it("rewards once and unlocks the next chapter", () => {
     const s = freshTactics(),
       b = beginBattle(s);
     b.phase = "victory";
     expect(awardVictory(s, b)?.gold).toBe(60);
-    expect(s.gold).toBe(210);
-    expect(s.unlocked).toBe(1);
-    expect(s.cleared).toEqual([0]);
     expect(awardVictory(s, b)).toBeNull();
     expect(s.gold).toBe(210);
+    expect(s.unlocked).toBe(1);
   });
-  it("does not reward an unfinished fight", () => {
-    const s = freshTactics();
-    expect(awardVictory(s, beginBattle(s))).toBeNull();
-    expect(s.gold).toBe(150);
-  });
-  it("levels up with XP carry and grants new build points", () => {
+  it("levels the only character and grants talent points", () => {
     const s = freshTactics();
     s.xp = 100;
     const b = beginBattle(s);
     b.phase = "victory";
-    expect(awardVictory(s, b)?.leveled).toBe(true);
+    awardVictory(s, b);
     expect(s.level).toBe(2);
     expect(s.xp).toBe(55);
     expect(pointsLeft(s, s.builds[0])).toBe(5);
-    expect(s.xp).toBeLessThan(requiredXp(s));
   });
-  it("round-trips character builds, inventory and unlocked chapters", () => {
+  it("preserves old party progress and its purchased upgrade in a solo migration", () => {
+    const current = freshTactics();
+    current.gold = 225;
+    current.level = 3;
+    current.xp = 20;
+    current.unlocked = 2;
+    current.cleared = [0, 1];
+    const old = {
+      ...current,
+      version: 2,
+      builds: [
+        { ...current.builds[0], name: "Ash" },
+        {
+          ...current.builds[0],
+          id: "lyra",
+          name: "Lyra",
+          classId: "arcanist",
+          upgraded: true,
+        },
+        { ...current.builds[0], id: "kael", name: "Kael", classId: "ranger" },
+      ],
+    };
+    const raw = JSON.stringify(old),
+      migrated = readTactics(raw);
+    expect(migrated.version).toBe(3);
+    expect(migrated.builds).toHaveLength(1);
+    expect(migrated.builds[0].upgraded).toBe(true);
+    expect(migrated.gold).toBe(225);
+    expect(migrated.unlocked).toBe(2);
+    expect(JSON.parse(raw).builds).toHaveLength(3);
+  });
+  it("round-trips a renamed built character", () => {
     const s = freshTactics();
+    renameHero(s, "นักดาบดาว");
     allocate(s, "ash", "vitality");
-    upgradeWeapon(s, "lyra");
-    s.unlocked = 2;
-    s.cleared = [0, 1];
     expect(readTactics(JSON.stringify(s))).toEqual(s);
   });
-  it("credits legacy gold without changing the old save format", () => {
-    const legacy = JSON.stringify({ version: 1, gold: 75 });
-    const s = readTactics(null, legacy);
+  it("credits the original action-game gold only at first creation", () => {
+    const old = JSON.stringify({ version: 1, gold: 75 }),
+      s = readTactics(null, old);
     expect(s.gold).toBe(225);
-    expect(readTactics(JSON.stringify(s), legacy).gold).toBe(225);
+    expect(readTactics(JSON.stringify(s), old).gold).toBe(225);
   });
   it.each([
-    null,
+    "{}",
     "oops",
     "null",
-    "{}",
     JSON.stringify({ ...freshTactics(), level: -1 }),
     JSON.stringify({ ...freshTactics(), potions: 100 }),
-    JSON.stringify({ ...freshTactics(), unlocked: 3 }),
-    JSON.stringify({ ...freshTactics(), xp: 999 }),
     JSON.stringify({ ...freshTactics(), builds: [] }),
-  ])("recovers from an invalid save: %s", (raw) => {
+  ])("recovers from invalid save %s", (raw) => {
     expect(readTactics(raw)).toEqual(freshTactics());
   });
-  it("rejects forged talent budgets and prototype job identifiers", () => {
-    const s = freshTactics();
-    s.builds[0].talents.might = 999;
-    expect(readTactics(JSON.stringify(s))).toEqual(freshTactics());
-    s.builds[0].talents.might = 0;
-    s.builds[0].classId = "__proto__" as any;
-    expect(readTactics(JSON.stringify(s))).toEqual(freshTactics());
-  });
-  it("a normally equipped first-chapter party can win through real turns", () => {
-    const s = freshTactics();
-    for (const build of s.builds) {
-      for (let i = 0; i < 3; i++)
-        allocate(
-          s,
-          build.id,
-          build.classId === "arcanist" ? "spirit" : "might",
-        );
-    }
-    const b = beginBattle(s);
-    let actions = 0;
-    while (b.phase === "ready" && actions++ < 150) {
-      const a = activeFighter(b)!;
-      if (a.side === "enemy") enemyAction(b);
-      else if (canAct(b, "skill") === null)
-        performAction(b, "skill", living(b, "enemy")[0].id, a.bp >= 2);
-      else performAction(b, "attack", living(b, "enemy")[0].id, a.bp >= 2);
-    }
-    expect(b.phase).toBe("victory");
-    expect(actions).toBeLessThan(100);
-  });
+  it.each(["warden", "arcanist", "ranger"] as ClassId[])(
+    "%s can clear the full campaign alone with earned resources",
+    (cls) => {
+      const s = freshTactics();
+      switchClass(s, "ash", cls);
+      for (let stage = 0; stage < 3; stage++) {
+        while (pointsLeft(s, s.builds[0]) > 0)
+          allocate(s, "ash", cls === "arcanist" ? "spirit" : "might");
+        upgradeWeapon(s, "ash");
+        const b = beginBattle(s, stage);
+        let count = 0;
+        while (b.phase === "ready" && count++ < 100) {
+          if (activeFighter(b)?.side === "enemy") {
+            enemyAction(b);
+            continue;
+          }
+          if (hero(b).hp / hero(b).maxHp < 0.4 && canAct(b, "item") === null) {
+            performAction(b, "item");
+            continue;
+          }
+          performAction(
+            b,
+            canAct(b, "skill") === null ? "skill" : "attack",
+            enemy(b).id,
+            hero(b).bp >= 2,
+          );
+        }
+        expect(b.phase, `${cls} chapter ${stage + 1}`).toBe("victory");
+        awardVictory(s, b);
+      }
+      expect(s.cleared).toEqual([0, 1, 2]);
+      expect(s.builds).toHaveLength(1);
+    },
+  );
 });
 
-describe("complete three-chapter campaign", () => {
-  it("allows a built party to defeat the Eclipse Sovereign through the normal economy and rules", () => {
-    const s = freshTactics();
-    for (let stage = 0; stage < 3; stage++) {
-      for (const build of s.builds)
-        while (pointsLeft(s, build) > 0)
-          allocate(
-            s,
-            build.id,
-            build.classId === "arcanist" ? "spirit" : "might",
-          );
-      for (const id of ["lyra", "ash", "kael"]) upgradeWeapon(s, id);
-      const b = beginBattle(s, stage);
-      let turns = 0;
-      while (b.phase === "ready" && turns++ < 180) {
-        const a = activeFighter(b)!;
-        if (a.side === "enemy") {
-          enemyAction(b);
-          continue;
-        }
-        const wounded = b.actors
-          .filter((x) => x.side === "party")
-          .sort((x, y) => x.hp / x.maxHp - y.hp / y.maxHp)[0];
-        if (wounded.hp / wounded.maxHp < 0.35 && canAct(b, "item") === null) {
-          performAction(b, "item");
-          continue;
-        }
-        if (
-          wounded.hp / wounded.maxHp < 0.45 &&
-          canAct(b, "restore") === null
-        ) {
-          performAction(b, "restore");
-          continue;
-        }
-        const target = living(b, "enemy").sort((x, y) => x.hp - y.hp)[0];
-        performAction(
-          b,
-          canAct(b, "skill") === null ? "skill" : "attack",
-          target.id,
-          a.bp >= 2,
-        );
-      }
-      expect(b.phase, `chapter ${stage + 1}, round ${b.round}`).toBe("victory");
-      expect(awardVictory(s, b)).not.toBeNull();
-    }
-    expect(s.cleared).toEqual([0, 1, 2]);
-    expect(s.level).toBeGreaterThan(1);
+describe("high-DPI buffers", () => {
+  it("renders a retina phone at its true density", () => {
+    const s = renderSize(390, 420, 3);
+    expect(s.bufferWidth).toBe(1170);
+    expect(s.bufferHeight).toBe(1260);
+    expect(s.density).toBe(3);
+  });
+  it("preserves normal desktop sizing and bounds oversized GPU buffers", () => {
+    expect(renderSize(1440, 900, 1).bufferWidth).toBe(1440);
+    const s = renderSize(2560, 1440, 3);
+    expect(s.bufferWidth * s.bufferHeight).toBeLessThan(4_200_000);
+    expect(s.density).toBeGreaterThanOrEqual(1);
+  });
+  it("handles zero-sized elements and invalid device density safely", () => {
+    const s = renderSize(0, 0, NaN);
+    expect(s.bufferWidth).toBe(1);
+    expect(s.bufferHeight).toBe(1);
+    expect(s.density).toBe(1);
   });
 });

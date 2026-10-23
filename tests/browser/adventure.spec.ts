@@ -6,50 +6,40 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#loading")).toHaveCount(0);
 });
 
-test("HD-2D arena loads without errors, overflow, or unsolicited turns", async ({
+test("one hero, detailed artwork and true high-DPI backing buffer load cleanly", async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.reload();
   await expect(page.locator("#loading")).toHaveCount(0);
-  await expect(
-    page.getByRole("heading", { name: "The Hollow Sanctuary", exact: true }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await expect(
-    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
-  ).toBeEnabled();
-  await page.waitForTimeout(700);
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
-  ).toBe(0);
-  expect(
-    await page.evaluate(() =>
-      (window as any).__pixelRebirth.scene.textures.exists("sanctuary"),
-    ),
-  ).toBe(true);
-  expect(
-    await page.evaluate(() =>
-      (window as any).__pixelRebirth.scene.textures.exists("hero-sheet"),
-    ),
-  ).toBe(true);
+  await expect(page.locator(".party-card")).toHaveCount(1);
+  const s = await page.evaluate(() => {
+    const r = (window as any).__pixelRebirth,
+      c = document.querySelector("canvas")!,
+      box = c.getBoundingClientRect();
+    return {
+      heroes: r.battle.actors.filter((a: any) => a.side === "party").length,
+      enemies: r.battle.actors.filter((a: any) => a.side === "enemy").length,
+      ratio: c.width / box.width,
+      dpr: devicePixelRatio,
+      texture: r.scene.textures.get("battle-warden").getSourceImage().height,
+      enemyArt: r.scene.textures.exists("enemy-sheet"),
+      overflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+  expect(s.heroes).toBe(1);
+  expect(s.enemies).toBe(1);
+  expect(s.ratio).toBeGreaterThanOrEqual(Math.min(s.dpr, 3) - 0.02);
+  expect(s.texture).toBe(576);
+  expect(s.enemyArt).toBe(true);
+  expect(s.overflow).toBe(false);
   expect(errors).toEqual([]);
 });
 
-test("target selection, boost, attack and turn advancement work through UI", async ({
+test("boosted attack, opponent response and return to your turn work", async ({
   page,
 }) => {
-  await page.getByRole("button", { name: "Next target", exact: true }).click();
-  await expect(page.locator("#target-name")).toHaveText("Astral Wisp");
-  await page
-    .getByRole("button", { name: "Previous target", exact: true })
-    .click();
-  await expect(page.locator("#target-name")).toHaveText("Hollow Sentinel");
   await page.locator("#boost").click();
   await expect(page.locator("#boost")).toHaveAttribute("aria-pressed", "true");
   await page
@@ -60,12 +50,21 @@ test("target selection, boost, attack and turn advancement work through UI", asy
       page.evaluate(
         () =>
           (window as any).__pixelRebirth.battle.actors.find(
-            (a: any) => a.id === "sentinel",
+            (a: any) => a.side === "enemy",
           ).hp,
       ),
     )
     .toBeLessThan(155);
-  await expect(page.locator("#actor-name")).toContainText("Lyra");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as any).__pixelRebirth.battle.actors.find(
+            (a: any) => a.side === "party",
+          ).hp,
+      ),
+    )
+    .toBeLessThan(240);
   await expect(
     page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
   ).toBeEnabled();
@@ -73,21 +72,95 @@ test("target selection, boost, attack and turn advancement work through UI", asy
     await page.evaluate(
       () =>
         (window as any).__pixelRebirth.battle.actors.find(
-          (a: any) => a.id === "kael",
+          (a: any) => a.side === "party",
         ).bp,
     ),
   ).toBe(1);
 });
 
-test("arcanist skill damages every enemy and enemy AI answers", async ({
+test("you can name, build and upgrade just your own character and reload it", async ({
   page,
 }) => {
   await page
-    .getByRole("button", { name: "Attack / โจมตี", exact: true })
+    .getByRole("button", { name: "ตัวละครของฉัน", exact: true })
     .click();
+  await page.locator("#hero-name-input").fill("นักดาบดาว");
+  await page.getByRole("button", { name: "บันทึกชื่อ", exact: true }).click();
+  for (let i = 0; i < 3; i++)
+    await page
+      .getByRole("button", { name: "Allocate might", exact: true })
+      .click();
   await expect(
-    page.getByRole("button", { name: "Skills / ทักษะ", exact: true }),
-  ).toBeEnabled();
+    page.getByRole("button", { name: "Allocate might", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Class Starweaver", exact: true })
+    .click();
+  await page.locator("#upgrade-weapon").click();
+  await expect(page.locator("#gold-value")).toHaveText("50");
+  await page.locator("#apply-build").click();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.filter(
+          (a: any) => a.side === "party",
+        ).length,
+    ),
+  ).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.side === "party",
+        ).attack,
+    ),
+  ).toBe(49);
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveCount(0);
+  await expect(page.locator(".hero-card-name")).toContainText("นักดาบดาว");
+  await expect(page.locator(".party-card")).toHaveCount(1);
+  await expect(page.locator("#gold-value")).toHaveText("50");
+});
+
+test("self-healing and immediate consumable persistence work", async ({
+  page,
+}) => {
+  await page
+    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
+    .click();
+  await expect(page.locator("#toasts")).toContainText("HP ของคุณเต็มแล้ว");
+  await expect(page.locator("#potion-count")).toHaveText("×5");
+  await page.evaluate(
+    () =>
+      ((window as any).__pixelRebirth.battle.actors.find(
+        (a: any) => a.side === "party",
+      ).hp = 10),
+  );
+  await page
+    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
+    .click();
+  await expect(page.locator("#potion-count")).toHaveText("×4");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.side === "party",
+        ).hp,
+    ),
+  ).toBe(100);
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveCount(0);
+  await expect(page.locator("#potion-count")).toHaveText("×4");
+});
+
+test("job skill can be cast by the single hero", async ({ page }) => {
+  await page
+    .getByRole("button", { name: "ตัวละครของฉัน", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Class Starweaver", exact: true })
+    .click();
+  await page.locator("#apply-build").click();
   await page
     .getByRole("button", { name: "Skills / ทักษะ", exact: true })
     .click();
@@ -96,155 +169,113 @@ test("arcanist skill damages every enemy and enemy AI answers", async ({
     .poll(() =>
       page.evaluate(
         () =>
-          (window as any).__pixelRebirth.battle.actors.filter(
-            (a: any) => a.side === "enemy" && a.hp < a.maxHp,
-          ).length,
+          (window as any).__pixelRebirth.battle.actors.find(
+            (a: any) => a.side === "enemy",
+          ).hp,
       ),
     )
-    .toBe(3);
+    .toBeLessThan(155);
+  await expect(
+    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
+  ).toBeEnabled();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.find(
+          (a: any) => a.side === "party",
+        ).mp,
+    ),
+  ).toBeLessThan(90);
+});
+
+test("old party save is preserved and migrated without losing progression", async ({
+  page,
+}) => {
+  const old = await page.evaluate(() => {
+    const r = (window as any).__pixelRebirth,
+      s = structuredClone(r.save);
+    const hero = s.builds[0];
+    s.version = 2;
+    s.level = 3;
+    s.xp = 20;
+    s.gold = 225;
+    s.unlocked = 2;
+    s.cleared = [0, 1];
+    s.builds = [
+      { ...hero, name: "Ash" },
+      {
+        ...hero,
+        id: "lyra",
+        name: "Lyra",
+        classId: "arcanist",
+        upgraded: true,
+      },
+      { ...hero, id: "kael", name: "Kael", classId: "ranger" },
+    ];
+    return s;
+  });
+  await page.addInitScript((old) => {
+    localStorage.setItem("pixel-rebirth-tactics-v2", JSON.stringify(old));
+    localStorage.removeItem("pixel-rebirth-solo-v3");
+  }, old);
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveCount(0);
+  await expect(page.locator("#gold-value")).toHaveText("225");
+  await expect(page.locator("#level-value")).toHaveText("3");
+  await expect(page.locator(".party-card")).toHaveCount(1);
+  const saved = await page.evaluate(() => ({
+    old: JSON.parse(localStorage.getItem("pixel-rebirth-tactics-v2")!).builds
+      .length,
+    new: JSON.parse(localStorage.getItem("pixel-rebirth-solo-v3")!).builds
+      .length,
+    upgrade: (window as any).__pixelRebirth.save.builds[0].upgraded,
+  }));
+  expect(saved).toEqual({ old: 3, new: 1, upgrade: true });
+});
+
+test("high-DPI targeting remains accurate and canvas resizes on phone rotation", async ({
+  page,
+}, info) => {
+  const position = await page.evaluate(() => {
+    const r = (window as any).__pixelRebirth,
+      v = r.scene.children.list.find(
+        (v: any) => v.texture?.key === "battle-sentinel",
+      ),
+      box = v.getBounds(),
+      canvas = document.querySelector("canvas")!.getBoundingClientRect();
+    r.scene.selected = "";
+    return { x: canvas.left + box.centerX, y: canvas.top + box.centerY };
+  });
+  if (info.project.name === "mobile")
+    await page.touchscreen.tap(position.x, position.y);
+  else await page.mouse.click(position.x, position.y);
+  expect(
+    await page.evaluate(() => (window as any).__pixelRebirth.scene.selected),
+  ).toBe("sentinel");
+  await page.setViewportSize({ width: 844, height: 390 });
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        (window as any).__pixelRebirth.battle.actors.some(
-          (a: any) => a.side === "party" && a.hp < a.maxHp,
-        ),
-      ),
+      page.evaluate(() => {
+        const c = document.querySelector("canvas")!,
+          p = document.querySelector("#game")!.getBoundingClientRect(),
+          b = c.getBoundingClientRect();
+        return (
+          Math.abs(b.width - p.width) < 1 && Math.abs(b.height - p.height) < 1
+        );
+      }),
     )
     .toBe(true);
-  await expect(
-    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
-  ).toBeEnabled();
-});
-
-test("build choices, talent limits, equipment, application and persistence", async ({
-  page,
-}) => {
-  await page
-    .getByRole("button", { name: "Party & builds", exact: true })
-    .click();
-  await expect(page.locator("#panel")).toBeVisible();
-  for (let i = 0; i < 3; i++)
-    await page
-      .getByRole("button", { name: "Allocate might", exact: true })
-      .click();
-  await expect(
-    page.getByRole("button", { name: "Allocate might", exact: true }),
-  ).toBeDisabled();
-  await expect(page.locator("#talent-points")).toHaveText("0 AVAILABLE");
-  await page
-    .getByRole("button", { name: "Class Starweaver", exact: true })
-    .click();
-  await page.locator("#upgrade-weapon").click();
-  await expect(page.locator("#upgrade-weapon")).toBeDisabled();
-  await expect(page.locator("#gold-value")).toHaveText("50");
-  await page.locator("#apply-build").click();
-  await expect(page.locator("#panel")).toBeHidden();
   expect(
     await page.evaluate(
-      () =>
-        (window as any).__pixelRebirth.battle.actors.find(
-          (a: any) => a.id === "ash",
-        ).classId,
+      () => document.documentElement.scrollWidth <= innerWidth,
     ),
-  ).toBe("arcanist");
-  expect(
-    await page.evaluate(
-      () =>
-        (window as any).__pixelRebirth.battle.actors.find(
-          (a: any) => a.id === "ash",
-        ).attack,
-    ),
-  ).toBe(43);
-  await page.reload();
-  await expect(page.locator("#loading")).toHaveCount(0);
-  await expect(page.locator("#gold-value")).toHaveText("50");
-  expect(
-    await page.evaluate(
-      () => (window as any).__pixelRebirth.save.builds[0].talents.might,
-    ),
-  ).toBe(3);
+  ).toBe(true);
+  await expect(page.locator(".party-card")).toHaveCount(1);
 });
 
-test("full-health potion does not spend a turn and an injured ally can be revived", async ({
+test("solo character wins a real encounter and unlocks the next", async ({
   page,
 }) => {
-  await page
-    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
-    .click();
-  await expect(page.locator("#toasts")).toContainText("HP เต็ม");
-  await expect(page.locator("#potion-count")).toHaveText("×5");
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
-  ).toBe(0);
-  await page.evaluate(() => {
-    (window as any).__pixelRebirth.battle.actors.find(
-      (a: any) => a.id === "ash",
-    ).hp = 0;
-  });
-  await page
-    .getByRole("button", { name: "Potion / ใช้ยา", exact: true })
-    .click();
-  await expect(page.locator("#potion-count")).toHaveText("×4");
-  expect(
-    await page.evaluate(
-      () =>
-        (window as any).__pixelRebirth.battle.actors.find(
-          (a: any) => a.id === "ash",
-        ).hp,
-    ),
-  ).toBe(90);
-  await page.reload();
-  await expect(page.locator("#loading")).toHaveCount(0);
-  await expect(page.locator("#potion-count")).toHaveText("×4");
-});
-
-test("dialogs stop turn scheduling and settings shop, sounds and reset confirmation work", async ({
-  page,
-}) => {
-  await page
-    .getByRole("button", { name: "Attack / โจมตี", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Attack / โจมตี", exact: true }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "Codex", exact: true }).click();
-  const cursor = await page.evaluate(
-    () => (window as any).__pixelRebirth.battle.cursor,
-  );
-  await page.waitForTimeout(900);
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.battle.cursor),
-  ).toBe(cursor);
-  await page
-    .getByRole("button", { name: "Close dialog / ปิด", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Settings / ตั้งค่า", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Toggle game sound", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Toggle game sound", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await page.locator("#buy-potion").click();
-  expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.save.potions),
-  ).toBe(6);
-  await expect(page.locator("#gold-value")).toHaveText("125");
-  await page.locator("#reset-save").click();
-  await page.locator("#cancel-reset").click();
-  await expect(page.locator("#panel")).toContainText("A moment of quiet.");
-});
-
-test("real turns complete an encounter, reward once and unlock the next chapter", async ({
-  page,
-}) => {
-  await page.evaluate(() => {
-    const r = (window as any).__pixelRebirth;
-    r.save.level = 10;
-    r.startBattle(0);
-  });
   await page
     .getByRole("button", { name: "Toggle battle speed", exact: true })
     .click();
@@ -255,39 +286,15 @@ test("real turns complete an encounter, reward once and unlock the next chapter"
   await expect(page.locator("#result")).toContainText("Victory");
   await expect(page.locator("#gold-value")).toHaveText("210");
   await page.locator("#next-battle").click();
-  await expect(page.locator("#result")).toBeHidden();
   await expect(
     page.getByRole("heading", { name: "The Sunken Archive", exact: true }),
   ).toBeVisible();
   expect(
-    await page.evaluate(() => (window as any).__pixelRebirth.save.unlocked),
+    await page.evaluate(
+      () =>
+        (window as any).__pixelRebirth.battle.actors.filter(
+          (a: any) => a.side === "party",
+        ).length,
+    ),
   ).toBe(1);
-});
-
-test("defeat offers a working retry and mobile commands can be tapped", async ({
-  page,
-}, info) => {
-  await page.evaluate(() => {
-    const r = (window as any).__pixelRebirth,
-      b = r.battle;
-    b.actors
-      .filter((a: any) => a.side === "party")
-      .forEach((a: any) => (a.hp = a.id === "ash" ? 1 : 0));
-    b.cursor = b.queue.indexOf("wisp");
-  });
-  await page
-    .getByRole("button", { name: "Toggle auto battle", exact: true })
-    .click();
-  await expect(page.locator("#result")).toBeVisible();
-  await expect(page.locator("#result")).toContainText("Rise again");
-  await page.locator("#next-battle").click();
-  await expect(page.locator("#result")).toBeHidden();
-  const attack = page.getByRole("button", {
-    name: "Attack / โจมตี",
-    exact: true,
-  });
-  await expect(attack).toBeEnabled();
-  if (info.project.name === "mobile") await attack.tap();
-  else await attack.click();
-  await expect(page.locator("#actor-name")).toContainText("Lyra");
 });

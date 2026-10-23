@@ -23,6 +23,7 @@ export class BattleScene extends Phaser.Scene {
   private backdropFailed = false;
   constructor(
     private hooks: { ready: () => void; select: (id: string) => void },
+    private pixelDensity = 1,
   ) {
     super("tactics");
   }
@@ -39,6 +40,10 @@ export class BattleScene extends Phaser.Scene {
     this.load.image(
       "hero-sheet",
       `${import.meta.env.BASE_URL}art/party-sprites.webp`,
+    );
+    this.load.image(
+      "enemy-sheet",
+      `${import.meta.env.BASE_URL}art/enemies-hd.webp`,
     );
     this.load.on("loaderror", (file: Phaser.Loader.File) => {
       if (file.key === "sanctuary") this.backdropFailed = true;
@@ -99,6 +104,7 @@ export class BattleScene extends Phaser.Scene {
             align: "center",
             stroke: "#0b1523",
             strokeThickness: 3,
+            resolution: this.pixelDensity,
           })
           .setOrigin(0.5, 0)
           .setDepth(601);
@@ -108,7 +114,9 @@ export class BattleScene extends Phaser.Scene {
       v.image.setAlpha(a.hp > 0 ? 1 : 0.16);
       v.shadow.setAlpha(a.hp > 0 ? 0.6 : 0.15);
       v.label.setText(a.name).setAlpha(a.hp > 0 ? 1 : 0.25);
-      v.image.flipX = a.side === "enemy" || a.classId === "ranger";
+      v.image.flipX =
+        a.classId === "ranger" ||
+        (a.side === "enemy" && !this.textures.exists("enemy-sheet"));
     }
     for (const [id, v] of this.views)
       if (!battle.actors.some((a) => a.id === id)) {
@@ -128,10 +136,14 @@ export class BattleScene extends Phaser.Scene {
       );
     this.layout();
   }
+  setRenderDensity(density: number) {
+    this.pixelDensity = density;
+  }
   private layout() {
     if (!this.rings) return;
-    const w = this.scale.width,
-      h = this.scale.height,
+    this.cameras.main.setOrigin(0, 0).setZoom(this.pixelDensity);
+    const w = this.scale.width / this.pixelDensity,
+      h = this.scale.height / this.pixelDensity,
       mobile = w < 700;
     if (this.background) {
       const scale = Math.max(
@@ -146,53 +158,33 @@ export class BattleScene extends Phaser.Scene {
     for (const a of this.battle.actors) {
       const v = this.views.get(a.id)!;
       const i = (a.side === "party" ? party : enemies).indexOf(a);
-      const x =
-        a.side === "party"
-          ? [0.67, 0.79, 0.88][i]
-          : this.battle.stage === 2
-            ? [0.28, 0.42][i]
-            : [0.26, 0.35, 0.15][i];
-      const y =
-        a.side === "party"
-          ? [0.66, 0.57, 0.69][i]
-          : this.battle.stage === 2
-            ? [0.65, 0.48][i]
-            : [0.66, 0.48, 0.57][i];
-      v.x = w * x;
-      v.y =
-        h *
-        (mobile
-          ? a.side === "party"
-            ? [0.78, 0.68, 0.82][i]
-            : this.battle.stage === 2
-              ? [0.78, 0.62][i]
-              : [0.79, 0.62, 0.7][i]
-          : y);
-      const factor = Phaser.Math.Clamp(w / 1180, 0.43, 1.15);
-      v.scale =
-        (a.classId === "sentinel"
-          ? 2.05
+      v.x = w * (a.side === "party" ? 0.76 : 0.26);
+      v.y = h * (mobile ? 0.79 : 0.66);
+      const factor = Phaser.Math.Clamp(w / 1180, 0.7, 1.2);
+      const wantedHeight =
+        (a.side === "party"
+          ? 230
           : a.classId === "dragon"
-            ? 1.7
-            : a.side === "party"
-              ? this.textures.exists("hero-sheet")
-                ? 0.9
-                : 2
-              : 1.75) * factor;
+            ? 255
+            : a.classId === "wisp"
+              ? 210
+              : 245) * factor;
+      v.scale = wantedHeight / v.image.height;
       v.image.setScale(v.scale);
       if (!this.animating) v.image.setPosition(v.x, v.y);
       v.image.setDepth(v.y);
       v.shadow
         .setPosition(v.x, v.y + 1)
         .setScale(
-          v.scale * (a.side === "enemy" && a.classId === "dragon" ? 1.2 : 0.75),
-          v.scale * 0.75,
+          Math.max(48, v.image.displayWidth * 0.58) / 70,
+          Math.max(12, v.image.displayHeight * 0.07) / 17,
         )
         .setDepth(v.y - 1);
-      const bw =
-        (a.side === "enemy" ? (a.classId === "dragon" ? 116 : 78) : 60) *
-        factor;
-      v.label.setPosition(v.x, v.y + 10).setFontSize(mobile ? 8 : 10);
+      const bw = (a.side === "enemy" ? 140 : 110) * factor;
+      v.label
+        .setResolution(this.pixelDensity)
+        .setPosition(v.x, v.y + 10)
+        .setFontSize(mobile ? 11 : 12);
       v.bar.clear();
       if (a.hp > 0) {
         v.bar
@@ -206,8 +198,8 @@ export class BattleScene extends Phaser.Scene {
   }
   update(time: number) {
     if (!this.ambient || !this.rings) return;
-    const w = this.scale.width,
-      h = this.scale.height;
+    const w = this.scale.width / this.pixelDensity,
+      h = this.scale.height / this.pixelDensity;
     this.rings.clear();
     const current = this.battle && activeFighter(this.battle);
     for (const [id, v] of this.views) {
@@ -222,15 +214,30 @@ export class BattleScene extends Phaser.Scene {
       }
       if (current?.id === id && this.battle?.phase === "ready") {
         this.rings.lineStyle(2, 0xe4c18a, 0.6 + 0.2 * Math.sin(time / 450));
-        this.rings.strokeEllipse(v.x, v.y + 2, 56 * v.scale, 14 * v.scale);
+        this.rings.strokeEllipse(
+          v.x,
+          v.y + 2,
+          Math.max(55, v.image.displayWidth * 0.56),
+          Math.max(14, v.image.displayHeight * 0.07),
+        );
         this.rings
           .fillStyle(0xe4c18a, 0.08)
-          .fillEllipse(v.x, v.y + 2, 62 * v.scale, 17 * v.scale);
+          .fillEllipse(
+            v.x,
+            v.y + 2,
+            Math.max(60, v.image.displayWidth * 0.62),
+            Math.max(16, v.image.displayHeight * 0.08),
+          );
       }
       if (this.selected === id && a.side === "enemy") {
         this.rings
           .lineStyle(1, 0xffd692, 0.45)
-          .strokeEllipse(v.x, v.y + 4, 52 * v.scale, 13 * v.scale);
+          .strokeEllipse(
+            v.x,
+            v.y + 4,
+            Math.max(60, v.image.displayWidth * 0.6),
+            Math.max(16, v.image.displayHeight * 0.07),
+          );
         this.rings
           .fillStyle(0xf0cf91, 0.9)
           .fillTriangle(
@@ -365,11 +372,13 @@ export class BattleScene extends Phaser.Scene {
             event.type === "heal" ? `+${event.amount}` : `${event.amount}`,
             {
               fontFamily: "Space Grotesk Variable, sans-serif",
-              fontSize: this.scale.width < 700 ? "22px" : "36px",
+              fontSize:
+                this.scale.width / this.pixelDensity < 700 ? "26px" : "36px",
               fontStyle: "bold",
               color: event.type === "heal" ? "#b0f4c6" : "#fff2d5",
               stroke: "#182a32",
               strokeThickness: 4,
+              resolution: this.pixelDensity,
             },
           )
           .setOrigin(0.5)
