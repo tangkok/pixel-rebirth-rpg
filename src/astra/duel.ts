@@ -4,7 +4,7 @@ import { CLASSES, ENEMIES, ITEMS, type ItemId } from "./data";
 import { act, damage, foeStats, heroStats, illegal, INTENTS, physicalBase, startBattle, type BattleEvent, type BattleState, type Command } from "./battle";
 import { ANIMS, FRAME_H, FRAME_W } from "./looks";
 import type { SaveData } from "./save";
-import { button, composite, h, show, still } from "./ui";
+import { button, composite, crisp, h, show, still } from "./ui";
 
 const STEP_MS = 520;
 
@@ -100,7 +100,6 @@ export function duel(
       return x;
     };
     const flash = (who: "hero" | "foe") => live.some((f) => f.who === who && f.kind === "hurt" && (now - f.t0) % 120 < 60);
-    ctx.imageSmoothingEnabled = false; // reset by canvas resizes in some browsers
     ctx.clearRect(0, 0, W, H);
     if (bg.complete && bg.naturalWidth) ctx.drawImage(bg, 0, 0);
     const aura = (x: number) => {
@@ -136,9 +135,8 @@ export function duel(
   const fit = () => {
     const info = frame.querySelector<HTMLElement>(".fe-info")!.offsetHeight;
     const k0 = Math.min(wrap.clientWidth / W, (wrap.clientHeight - info) / H);
-    const k = k0 >= 2 ? Math.floor(k0) : Math.max(0.5, k0);
-    frame.style.width = `${Math.floor(W * k)}px`;
-    canvas.style.height = `${Math.floor(H * k)}px`;
+    crisp(canvas, W, H, k0 >= 2 ? Math.floor(k0) : Math.max(0.5, k0));
+    frame.style.width = canvas.style.width;
   };
 
   // ---------- state → screen ----------

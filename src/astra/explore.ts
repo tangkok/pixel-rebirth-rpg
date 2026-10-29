@@ -5,7 +5,7 @@ import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
-import { button, composite, h, show, still, store } from "./ui";
+import { button, composite, crisp, h, show, still, store } from "./ui";
 import {
   acceptQuest,
   CHECKPOINTS,
@@ -305,15 +305,15 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
 
   // ---------- rendering ----------
   let scale = 1;
+  let vw = 1; // view size in art pixels
+  let vh = 1;
   function resize() {
     const r = main.getBoundingClientRect();
     // Integer zoom so 16px tiles stay crisp; at least ~11x9 tiles stay visible.
     scale = Math.max(1, Math.min(4, Math.floor(Math.min(r.width / (11 * TILE), r.height / (9 * TILE)))));
-    canvas.width = Math.ceil(r.width / scale);
-    canvas.height = Math.ceil(r.height / scale);
-    canvas.style.width = `${canvas.width * scale}px`;
-    canvas.style.height = `${canvas.height * scale}px`;
-    ctx.imageSmoothingEnabled = false;
+    vw = Math.ceil(r.width / scale);
+    vh = Math.ceil(r.height / scale);
+    crisp(canvas, vw, vh, scale);
   }
   addEventListener("resize", resize, on);
 
@@ -340,15 +340,15 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     const hx = ((move ? move.fx + (pos.x - move.fx) * k : pos.x) + 0.5) * TILE;
     const hy = ((move ? move.fy + (pos.y - move.fy) * k : pos.y) + 1) * TILE;
     const cam = (view: number, size: number, at: number) => (size <= view ? Math.floor((size - view) / 2) : Math.round(Math.max(0, Math.min(size - view, at - view / 2))));
-    const cx = cam(canvas.width, W, hx);
-    const cy = cam(canvas.height, H, hy - TILE / 2);
+    const cx = cam(vw, W, hx);
+    const cy = cam(vh, H, hy - TILE / 2);
     ctx.fillStyle = "#0b1426";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, vw, vh);
     const tile = (t: number, x: number, y: number) => ctx.drawImage(sheets!.tiles, t * TILE, 0, TILE, TILE, x * TILE - cx, y * TILE - cy, TILE, TILE);
     const x0 = Math.max(0, Math.floor(cx / TILE));
     const y0 = Math.max(0, Math.floor(cy / TILE));
-    for (let y = y0; y < Math.min(m.rows.length, y0 + canvas.height / TILE + 2); y++)
-      for (let x = x0; x < Math.min(m.rows[0].length, x0 + canvas.width / TILE + 2); x++) tile(tileIndex(tileAt(m, x, y)!), x, y);
+    for (let y = y0; y < Math.min(m.rows.length, y0 + vh / TILE + 2); y++)
+      for (let x = x0; x < Math.min(m.rows[0].length, x0 + vw / TILE + 2); x++) tile(tileIndex(tileAt(m, x, y)!), x, y);
 
     const forest = m.id === "whispering_forest";
     const moving = !!move || (!!held && !busy);

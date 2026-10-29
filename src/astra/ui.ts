@@ -94,6 +94,24 @@ export function composite(look: Look, classId: ClassId) {
 
 export const still = () => settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/**
+ * Sizes a canvas so every art pixel covers a whole number of device pixels (no browser
+ * resampling, which blurs or unevenly doubles pixels on Retina/iPad). Returns that scale;
+ * the context is left in art-pixel units with smoothing off.
+ */
+export function crisp(canvas: HTMLCanvasElement, artW: number, artH: number, cssScale: number): number {
+  const dpr = devicePixelRatio || 1;
+  const s = Math.max(1, Math.floor(cssScale * dpr + 1e-6));
+  canvas.width = artW * s;
+  canvas.height = artH * s;
+  canvas.style.width = `${canvas.width / dpr}px`;
+  canvas.style.height = `${canvas.height / dpr}px`;
+  const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  return s;
+}
+
 export function heroSprite(look: Look, classId: ClassId, label: string) {
   const canvas = h("canvas", { class: "sprite", width: FRAME_W, height: FRAME_H });
   const box = h("div", { class: "sprite-box", role: "img", aria: { label } } as never, canvas);
@@ -108,9 +126,8 @@ export function heroSprite(look: Look, classId: ClassId, label: string) {
       draw();
       const timer = setInterval(() => {
         if (!canvas.isConnected) return clearInterval(timer);
-        if (still()) return;
-        f = (f + 1) % ANIMS.idle.frames;
-        draw();
+        if (!still()) f = (f + 1) % ANIMS.idle.frames;
+        draw(); // also repaints after fitSprites() resized the canvas
       }, 130);
     },
     () => box.classList.add("missing"),
@@ -123,6 +140,8 @@ export function fitSprites() {
   for (const box of root.querySelectorAll<HTMLElement>(".sprite-box")) {
     const k = Math.max(1, Math.floor(Math.min(box.clientWidth / 100, box.clientHeight / 40)));
     box.style.setProperty("--k", String(k));
+    const c = box.querySelector<HTMLCanvasElement>("canvas.sprite");
+    if (c) crisp(c, FRAME_W, FRAME_H, k);
   }
 }
 addEventListener("resize", fitSprites);
