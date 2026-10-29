@@ -1,12 +1,12 @@
 // Top-down exploration screen. Draws the map and forwards input; every game rule lives in
 // world.ts and every committed change goes through commit() so it is saved atomically.
-import { ENEMIES, ITEMS, LEVEL_EXP, STAT_IDS, STAT_LABEL, type ItemId } from "./data";
+import { ENEMIES, ITEMS, LEVEL_EXP, STAT_IDS, STAT_LABEL, type ClassId, type ItemId } from "./data";
 import { duel } from "./duel";
 import { effectiveStats } from "./hero";
-import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
+import { ANIMS, FB, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
 import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
-import { button, composite, crisp, h, settings, show, still, store } from "./ui";
+import { button, composite, compositeFB, crisp, h, settings, show, still, store } from "./ui";
 import {
   acceptQuest,
   BUILDING_PX,
@@ -420,8 +420,10 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   }
   addEventListener("resize", resize, on);
 
-  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement; kael: HTMLCanvasElement }) | null = null;
-  Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), composite(KAEL_LOOK, "ranger"), loadArt()])
+  type Sheet = { side: HTMLCanvasElement; fb: HTMLCanvasElement };
+  let sheets: (Art & { hero: Sheet; elaine: Sheet; kael: Sheet }) | null = null;
+  const sheet = (look: Look, classId: ClassId) => Promise.all([composite(look, classId), compositeFB(look)]).then(([side, fb]) => ({ side, fb }));
+  Promise.all([sheet(save.hero.look, save.hero.classId), sheet(ELAINE, "ranger"), sheet(KAEL_LOOK, "ranger"), loadArt()])
     .then(([hero, elaine, kael, a]) => (sheets = { ...a, hero, elaine, kael }))
     .catch(() => toast("โหลดภาพแผนที่ไม่สำเร็จ"));
 
@@ -544,7 +546,10 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
         const walking = k < 1 && !busy;
         sprites.push({
           y: k < 1 ? Math.max(fy, e.y) : e.y,
-          draw: () => person(sheets!.kael, walking ? "run" : "idle", Math.floor(anim / (walking ? 110 : 160)), kx - cx, ky - cy, walking ? e.x < fx : hx < kx),
+          draw: () => {
+            const view = walking && fx === e.x ? (e.y < fy ? "up" : "down") : "side";
+            person(sheets!.kael, walking ? "run" : "idle", Math.floor(anim / (walking ? 110 : 160)), kx - cx, ky - cy, walking ? e.x < fx : hx < kx, view);
+          },
         });
       }
       if (e.kind === "enemy")
@@ -555,7 +560,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     }
     sprites.push({
       y: move ? Math.max(pos.y, move.fy) : pos.y,
-      draw: () => person(sheets!.hero, moving ? "run" : "idle", Math.floor(anim / (moving ? 90 : 140)), hx - cx, hy - cy, facing === "left"),
+      draw: () => person(sheets!.hero, moving ? "run" : "idle", Math.floor(anim / (moving ? 90 : 140)), hx - cx, hy - cy, facing === "left", dir === "up" || dir === "down" ? dir : "side"),
     });
     sprites.sort((a, b) => a.y - b.y).forEach((s) => s.draw());
 
@@ -640,7 +645,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
 
   }
 
-  function person(sheet: HTMLCanvasElement, a: keyof typeof ANIMS, f: number, fx: number, fy: number, flip: boolean) {
+  function person(sheet: Sheet, a: keyof typeof ANIMS, f: number, fx: number, fy: number, flip: boolean, view: "side" | "up" | "down" = "side") {
     const { row, frames } = ANIMS[a];
     ctx.save();
     ctx.translate(Math.round(fx), Math.round(fy));
@@ -648,8 +653,14 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     ctx.beginPath();
     ctx.ellipse(2, -2, 7, 2.5, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (view !== "side") {
+      // 4-frame walk at a steadier pace than the 8-frame side run; idle stands on frame 1.
+      const ff = a === "run" ? Math.floor(performance.now() / 130) % FB.frames : 1;
+      ctx.drawImage(sheet.fb, ff * FB.w, (view === "up" ? 1 : 0) * FB.h, FB.w, FB.h, -FB.foot.x, -FB.foot.y - 3, FB.w, FB.h);
+      return ctx.restore();
+    }
     if (flip) ctx.scale(-1, 1);
-    ctx.drawImage(sheet, (f % frames) * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H, -HERO_FOOT.x, -HERO_FOOT.y - 2, FRAME_W, FRAME_H);
+    ctx.drawImage(sheet.side, (f % frames) * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H, -HERO_FOOT.x, -HERO_FOOT.y - 2, FRAME_W, FRAME_H);
     ctx.restore();
   }
 
