@@ -164,6 +164,7 @@ export function illegal(b: BattleState, c: Command): string | null {
   if (c.type === "burst" && b.hero.astra < 100) return "Astra ยังไม่เต็ม";
   if (c.type === "item") {
     if (!(c.item in ITEMS) || (b.items[c.item] ?? 0) < 1) return "ไม่มีไอเทมนี้";
+    if ("material" in ITEMS[c.item]) return "ใช้ในการต่อสู้ไม่ได้";
     if ("heal" in ITEMS[c.item] && b.hero.hp >= heroStats(b).maxHp) return "HP เต็มแล้ว";
   }
   return null;
@@ -285,7 +286,7 @@ export function act(prev: BattleState, actionId: string, c: Command, timing: Tim
     const item = ITEMS[c.item];
     b.items[c.item] -= 1;
     if ("heal" in item) heal(b, ev, item.name, item.heal);
-    else strike(item.name, "magic", item.power, [], item.element); // PLACEHOLDER: consumables hit as magic
+    else if ("power" in item) strike(item.name, "magic", item.power, [], item.element); // PLACEHOLDER: consumables hit as magic
   }
 
   // End of a hero action: an older aura that was not used expires; Thermal Shock ticks down.

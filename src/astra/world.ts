@@ -65,6 +65,8 @@ export const STEP: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], 
 
 export type Entity =
   | { kind: "npc"; id: "npc_scout_elaine"; x: number; y: number }
+  /** Walks `route` (corner tiles of a closed loop, joined by straight lines); x, y is where it starts. */
+  | { kind: "merchant"; id: "npc_adventurer_kael"; x: number; y: number; route: [number, number][] }
   | { kind: "crystal"; id: CheckpointId; x: number; y: number }
   | { kind: "chest"; id: string; x: number; y: number; item: ItemId; count: number }
   | { kind: "sign"; id: string; x: number; y: number; text: string }
@@ -140,6 +142,8 @@ export const MAPS: Record<MapId, WorldMap> = {
     ],
     entities: [
       { kind: "npc", id: "npc_scout_elaine", x: 22, y: 11 },
+      // Loops the plaza around the fountain, clear of Elaine, the crystal and every door.
+      { kind: "merchant", id: "npc_adventurer_kael", x: 15, y: 10, route: [[15, 10], [24, 10], [24, 15], [15, 15]] },
       { kind: "crystal", id: "oakheart_square", x: 16, y: 16 },
       { kind: "chest", id: "oakheart_chest", x: 37, y: 26, item: "potion", count: 1 },
       { kind: "sign", id: "oakheart_sign", x: 37, y: 13, text: "→ Whispering Forest" },
@@ -192,13 +196,28 @@ export function tileAt(map: WorldMap, x: number, y: number): TileName | null {
   return ch === undefined ? null : (LEGEND[ch] ?? "forest");
 }
 
+/** Where walking NPCs stand right now, by entity id (explore.ts owns their clock). */
+export type Walkers = Partial<Record<string, { x: number; y: number }>>;
+
 /** Entities still present: defeated enemies are gone, opened chests stay (as open chests). */
-export function liveEntities(map: WorldMap, save: SaveData): Entity[] {
-  return map.entities.filter((e) => e.kind !== "enemy" || !save.progress.defeated.includes(e.id));
+export function liveEntities(map: WorldMap, save: SaveData, walkers: Walkers = {}): Entity[] {
+  return map.entities
+    .filter((e) => e.kind !== "enemy" || !save.progress.defeated.includes(e.id))
+    .map((e) => (walkers[e.id] ? { ...e, ...walkers[e.id] } : e));
 }
 
-export function entityAt(map: WorldMap, save: SaveData, x: number, y: number) {
-  return liveEntities(map, save).find((e) => e.x === x && e.y === y) ?? null;
+export function entityAt(map: WorldMap, save: SaveData, x: number, y: number, walkers: Walkers = {}) {
+  return liveEntities(map, save, walkers).find((e) => e.x === x && e.y === y) ?? null;
+}
+
+/** Every tile of a merchant's loop, in walking order. */
+export function routeTiles(route: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  route.forEach(([x, y], i) => {
+    const [nx, ny] = route[(i + 1) % route.length];
+    for (let t = 0; t < Math.abs(nx - x) + Math.abs(ny - y); t++) out.push([x + Math.sign(nx - x) * t, y + Math.sign(ny - y) * t]);
+  });
+  return out;
 }
 
 const footprints = new Map<MapId, Set<string>>();
@@ -216,16 +235,16 @@ export function underProp(map: WorldMap, x: number, y: number): boolean {
   return set.has(`${x},${y}`);
 }
 
-export function walkable(map: WorldMap, save: SaveData, x: number, y: number): boolean {
+export function walkable(map: WorldMap, save: SaveData, x: number, y: number, walkers: Walkers = {}): boolean {
   const t = tileAt(map, x, y);
-  return t !== null && !SOLID.has(t) && !underProp(map, x, y) && !entityAt(map, save, x, y);
+  return t !== null && !SOLID.has(t) && !underProp(map, x, y) && !entityAt(map, save, x, y, walkers);
 }
 
 /** What the hero can interact with: the tile it faces first, then any other neighbour. */
-export function interactTarget(map: WorldMap, save: SaveData, x: number, y: number, dir: Dir): Entity | null {
+export function interactTarget(map: WorldMap, save: SaveData, x: number, y: number, dir: Dir, walkers: Walkers = {}): Entity | null {
   const order: Dir[] = [dir, ...(["up", "down", "left", "right"] as Dir[]).filter((d) => d !== dir)];
   for (const d of order) {
-    const e = entityAt(map, save, x + STEP[d][0], y + STEP[d][1]);
+    const e = entityAt(map, save, x + STEP[d][0], y + STEP[d][1], walkers);
     if (e) return e;
   }
   return null;
@@ -239,6 +258,20 @@ export const QUEST_REWARD_ID = "forest_troubles:turnin";
 export type QuestState = "AVAILABLE" | "ACTIVE" | "READY_TO_TURN_IN" | "COMPLETED";
 export const QUEST_STATES: QuestState[] = ["AVAILABLE", "ACTIVE", "READY_TO_TURN_IN", "COMPLETED"];
 export const ITEM_CAP = 99;
+export const GOLD_CAP = 9_999_999;
+
+/** LOOT_DROP_SYSTEM encounter table; only enemies whose material item exists are listed. */
+export const LOOT: Partial<Record<EnemyId, { gold: [number, number]; item: ItemId }>> = {
+  forest_wolf: { gold: [8, 18], item: "wolf_pelt" }, // PLACEHOLDER: material drop chance is not authored, so it is always 1
+};
+/** Gold within the inclusive range, fixed by the encounter id so a reload can never reroll it. */
+export function lootOf(enemy: EnemyId, encounterId: string) {
+  const l = LOOT[enemy];
+  if (!l) return null;
+  let hash = 0;
+  for (const c of encounterId) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return { gold: l.gold[0] + (hash % (l.gold[1] - l.gold[0] + 1)), item: l.item };
+}
 
 const clone = (s: SaveData): SaveData => JSON.parse(JSON.stringify(s));
 export const questOf = (s: SaveData) => s.progress.quest;
@@ -264,6 +297,12 @@ export function recordVictory(s: SaveData, encounterId: string): SaveData {
   n.progress.defeated.push(encounterId);
   n.hero.exp = Math.min(n.hero.exp + expFor(e.enemy, n.hero.talentId), 1e7);
   n.hero.level = levelFor(n.hero.exp);
+  const loot = lootOf(e.enemy, encounterId);
+  if (loot) {
+    n.gold = Math.min(n.gold + loot.gold, GOLD_CAP);
+    // shortcut: a full stack drops the pelt (no pending-reward box yet); three wolves cannot reach 99.
+    n.items[loot.item] = Math.min(n.items[loot.item] + 1, ITEM_CAP);
+  }
   const q = n.progress.quest;
   if (q.state === "ACTIVE" && e.enemy === "forest_wolf" && !q.kills.includes(encounterId)) {
     q.kills.push(encounterId);
@@ -277,7 +316,7 @@ export function claimQuestReward(s: SaveData): SaveData | null {
   if (s.progress.quest.state !== "READY_TO_TURN_IN" || s.progress.claimed.includes(QUEST_REWARD_ID)) return s;
   if (s.items.potion + QUEST_REWARD.potion > ITEM_CAP) return null;
   const n = clone(s);
-  n.gold = Math.min(n.gold + QUEST_REWARD.gold, 9_999_999);
+  n.gold = Math.min(n.gold + QUEST_REWARD.gold, GOLD_CAP);
   n.items.potion += QUEST_REWARD.potion;
   n.progress.claimed.push(QUEST_REWARD_ID);
   n.progress.quest.state = "COMPLETED";

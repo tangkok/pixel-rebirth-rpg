@@ -5,6 +5,7 @@ import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
+import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
 import { button, composite, crisp, h, settings, show, still, store } from "./ui";
 import {
   acceptQuest,
@@ -15,11 +16,13 @@ import {
   entityAt,
   interactTarget,
   liveEntities,
+  lootOf,
   MAPS,
   openChest,
   PROP_ART,
   questLine,
   recordVictory,
+  routeTiles,
   setCheckpoint,
   STEP,
   TILE,
@@ -28,6 +31,7 @@ import {
   walkable,
   type Dir,
   type Entity,
+  type Walkers,
 } from "./world";
 
 const MOVE_MS = 150;
@@ -37,6 +41,9 @@ const KEYS: Record<string, Dir> = {
 };
 // Elaine wears a fixed Heroes99 look so she reads as a ranger scout.
 const ELAINE: Look = { skin: 2, face: 3, hair: "f4", hairColor: 6, outfit: 11, outfitColor: 2 };
+const KAEL_LOOK: Look = { skin: 1, face: 2, hair: "m6", hairColor: 3, outfit: 4, outfitColor: 5 };
+const KAEL_STEP_MS = 420;
+const KAEL_PAUSE_MS = 1400; // stops at each corner of his loop to look around
 const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId);
 const HERO_FOOT = { x: 41, y: 34 }; // feet of the Heroes99 body inside its 100x40 frame
 
@@ -94,6 +101,8 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   let move: { fx: number; fy: number; t0: number } | null = null;
   let held: Dir | null = null;
   let busy = false; // a dialog, menu or transition owns input
+  let walkers: Walkers = {};
+  let walk: { id: string; tiles: [number, number][]; corners: Set<number>; i: number; from: [number, number]; t0: number; next: number } | null = null;
   const life = new AbortController();
   const on = { signal: life.signal };
 
@@ -190,9 +199,9 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (d === "left" || d === "right") facing = d;
     const nx = pos.x + STEP[d][0];
     const ny = pos.y + STEP[d][1];
-    const e = entityAt(map(), save, nx, ny);
+    const e = entityAt(map(), save, nx, ny, walkers);
     if (e?.kind === "enemy") return encounter(e);
-    if (!walkable(map(), save, nx, ny)) return refreshTarget();
+    if (!walkable(map(), save, nx, ny, walkers)) return refreshTarget();
     move = { fx: pos.x, fy: pos.y, t0: performance.now() };
     pos = { x: nx, y: ny };
   }
@@ -202,6 +211,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (exit) {
       pos = { x: exit.ax, y: exit.ay };
       commit({ ...save, progress: { ...save.progress, map: exit.to } }, `เข้าสู่ ${MAPS[exit.to].name}`);
+      startWalk(performance.now());
     }
     hud();
     refreshTarget();
@@ -209,19 +219,20 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
 
   // ---------- interaction ----------
   let target: Entity | null = null;
-  const ACT_LABEL: Record<Entity["kind"], string> = { npc: "คุย", crystal: "บันทึก", chest: "เปิดหีบ", sign: "อ่าน", enemy: "สู้" };
+  const ACT_LABEL: Record<Entity["kind"], string> = { npc: "คุย", merchant: "คุย", crystal: "บันทึก", chest: "เปิดหีบ", sign: "อ่าน", enemy: "สู้" };
   function refreshTarget() {
-    target = busy ? null : interactTarget(map(), save, pos.x, pos.y, dir);
+    target = busy ? null : interactTarget(map(), save, pos.x, pos.y, dir, walkers);
     act.hidden = !target;
     if (target) act.textContent = ACT_LABEL[target.kind];
   }
 
   function interact() {
     // Re-check on the game side: the button may be stale after a move or a reload.
-    const t = busy || move ? null : interactTarget(map(), save, pos.x, pos.y, dir);
+    const t = busy || move ? null : interactTarget(map(), save, pos.x, pos.y, dir, walkers);
     if (!t) return;
     if (t.kind === "enemy") return encounter(t);
     if (t.kind === "npc") return talkElaine();
+    if (t.kind === "merchant") return kaelMenu();
     if (t.kind === "sign") return talk("ป้าย", t.text, [["ปิด", close]]);
     if (t.kind === "crystal")
       return talk("คริสตัลแห่งการบันทึก", "บันทึกการเดินทาง ฟื้นฟู HP/MP และตั้งจุดเริ่มใหม่ที่นี่?", [
@@ -253,6 +264,48 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
         },
       ]),
     );
+  }
+
+  // ---------- Kael: Talk / Buy / Sell / Leave (trade rules in trade.ts) ----------
+  const KAEL_WHO = "Kael · นักล่าพเนจร";
+  function kaelMenu(note = "มีอะไรให้ช่วยไหม นักผจญภัย?") {
+    talk(KAEL_WHO, note, [
+      ["Talk คุย", () => kaelTalk(0)],
+      ["Buy ซื้อ", () => kaelShop("buy")],
+      ["Sell ขาย", () => kaelShop("sell")],
+      ["Leave ไปก่อน", close],
+    ]);
+  }
+  function kaelTalk(page: number) {
+    const last = page + 1 >= KAEL_TALK.length;
+    talk(KAEL_WHO, `${KAEL_TALK[page]} (${page + 1}/${KAEL_TALK.length})`, [
+      [last ? "กลับ" : "ต่อไป", () => (last ? kaelMenu() : kaelTalk(page + 1))],
+      ["ไปก่อน", close],
+    ]);
+  }
+  function kaelShop(side: "buy" | "sell", note = "") {
+    const id = nextTradeId(save); // fixed when the page is drawn, so a repeated confirm is refused
+    const lines = TRADE_ITEMS.map((it) => {
+      const p = KAEL_PRICES[it]!;
+      return side === "buy"
+        ? `${ITEMS[it].name} ${p.heroBuys} G · Kael มี ${save.trade.kael[it] ?? 0}`
+        : `${ITEMS[it].name} ${p.heroSells} G · คุณมี ${save.items[it]}`;
+    });
+    const deal = (it: ItemId): [string, () => void] => [
+      `${side === "buy" ? "ซื้อ" : "ขาย"} ${ITEMS[it].name} ×1`,
+      () => {
+        const r: Trade = side === "buy" ? merchantBuy(save, it, 1, id) : merchantSell(save, it, 1, id);
+        if (!r.ok) return kaelShop(side, r.why);
+        const price = KAEL_PRICES[it]!;
+        commit(r.save, side === "buy" ? `ซื้อ ${ITEMS[it].name} ×1 · −${price.heroBuys} G` : `ขาย ${ITEMS[it].name} ×1 · +${price.heroSells} G`);
+        kaelShop(side, "ขอบใจ!");
+        // The fresh page's trade buttons wait a moment, so a double tap on "buy" is still one trade.
+        const deals = [...panel.querySelectorAll<HTMLButtonElement>(".row button")].slice(0, -1);
+        deals.forEach((b) => (b.disabled = true));
+        setTimeout(() => !panel.dataset.done && deals.forEach((b) => (b.disabled = false)), 400);
+      },
+    ];
+    talk(KAEL_WHO, `${note ? `${note} · ` : ""}${lines.join(" · ")} · Gold ${save.gold}`, [...TRADE_ITEMS.map(deal), ["กลับ", () => kaelMenu()]]);
   }
 
   /** Bounded dialog panel; each choice runs once (buttons disable on first press). */
@@ -304,10 +357,12 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     const here = withPos(save);
     duel(here, e.id, e.enemy, map().name, (b) => {
       if (b.over === "win") {
-        const won = recordVictory(here, e.id);
-        const next: SaveData = { ...won, hero: { ...won.hero, hp: b.hero.hp, mp: b.hero.mp }, items: b.items, savedAt: Date.now() };
+        // Merge the battle's HP/MP/items first so the victory's loot lands on top of them.
+        const next: SaveData = { ...recordVictory({ ...here, hero: { ...here.hero, hp: b.hero.hp, mp: b.hero.mp }, items: b.items }, e.id), savedAt: Date.now() };
         const ok = writeSave(store, next);
-        return explore(next, toTitle, `ชนะ ${ENEMIES[e.enemy].name} · +${ENEMIES[e.enemy].exp} EXP${ok ? "" : " · บันทึกไม่ได้"}`);
+        const loot = lootOf(e.enemy, e.id);
+        const got = loot ? ` · +${loot.gold} Gold · ${ITEMS[loot.item].name} ×1` : "";
+        return explore(next, toTitle, `ชนะ ${ENEMIES[e.enemy].name} · +${ENEMIES[e.enemy].exp} EXP${got}${ok ? "" : " · บันทึกไม่ได้"}`);
       }
       // Loss: back to the last checkpoint at full strength; the pre-battle save is otherwise kept.
       const c = CHECKPOINTS[here.progress.checkpoint];
@@ -356,9 +411,9 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   }
   addEventListener("resize", resize, on);
 
-  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement }) | null = null;
-  Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), loadArt()])
-    .then(([hero, elaine, a]) => (sheets = { ...a, hero, elaine }))
+  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement; kael: HTMLCanvasElement }) | null = null;
+  Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), composite(KAEL_LOOK, "ranger"), loadArt()])
+    .then(([hero, elaine, kael, a]) => (sheets = { ...a, hero, elaine, kael }))
     .catch(() => toast("โหลดภาพแผนที่ไม่สำเร็จ"));
 
   function frame(now: number) {
@@ -366,6 +421,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (!main.isConnected) return leave();
     if (move && now - move.t0 >= MOVE_MS) arrive();
     if (!move && held && !busy) tryMove(held);
+    stepKael(now);
     draw(now);
     requestAnimationFrame(frame);
   }
@@ -399,6 +455,38 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     return c;
   }
 
+  // ---------- Kael's walk: one tile at a time along his loop, paused while anyone talks ----------
+  function startWalk(now: number) {
+    const e = map().entities.find((x) => x.kind === "merchant");
+    walk = null;
+    walkers = {};
+    delete main.dataset.kael;
+    if (e?.kind !== "merchant") return;
+    const tiles = routeTiles(e.route);
+    let i = Math.max(0, tiles.findIndex(([x, y]) => x === e.x && y === e.y));
+    if (tiles[i][0] === pos.x && tiles[i][1] === pos.y) i = (i + 1) % tiles.length; // never spawn on the hero
+    const corners = new Set(e.route.map(([x, y]) => tiles.findIndex(([tx, ty]) => tx === x && ty === y)));
+    walk = { id: e.id, tiles, corners, i, from: tiles[i], t0: 0, next: now + KAEL_PAUSE_MS };
+    walkers = { [e.id]: { x: tiles[i][0], y: tiles[i][1] } };
+    main.dataset.kael = `${tiles[i][0]},${tiles[i][1]}`;
+  }
+  function stepKael(now: number) {
+    if (!walk) return;
+    if (busy) walk.next = Math.max(walk.next, now + KAEL_STEP_MS); // stops when spoken to, resumes after
+    if (now < walk.next) return;
+    const j = (walk.i + 1) % walk.tiles.length;
+    const [x, y] = walk.tiles[j];
+    // Never step into the hero (where it stands or is still leaving): wait a moment instead.
+    if ((x === pos.x && y === pos.y) || (move && x === move.fx && y === move.fy)) return void (walk.next = now + 300);
+    walk.from = walk.tiles[walk.i];
+    walk.t0 = now;
+    walk.i = j;
+    walk.next = now + KAEL_STEP_MS + (walk.corners.has(j) ? KAEL_PAUSE_MS : 0);
+    walkers = { [walk.id]: { x, y } };
+    main.dataset.kael = `${x},${y}`;
+    refreshTarget();
+  }
+
   function draw(now: number) {
     if (!sheets) return;
     const m = map();
@@ -430,7 +518,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
             : ctx.drawImage(sheets!.buildings, (cell % 10) * BUILDING_PX, Math.floor(cell / 10) * BUILDING_PX, BUILDING_PX, BUILDING_PX, p.x * TILE - cx, p.y * TILE - cy, BUILDING_PX, BUILDING_PX),
       });
     }
-    for (const e of liveEntities(m, save)) {
+    for (const e of liveEntities(m, save, walkers)) {
       if (e.kind === "crystal") tile(tileIndex(tileAt(m, e.x, e.y)?.startsWith("plaza") ? "plaza_crystal" : "crystal"), e.x, e.y);
       if (e.kind === "sign") tile(tileIndex("sign"), e.x, e.y);
       if (e.kind === "chest") {
@@ -439,6 +527,17 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
       }
       if (e.kind === "npc")
         sprites.push({ y: e.y, draw: () => person(sheets!.elaine, "idle", Math.floor(anim / 160), (e.x + 0.5) * TILE - cx, (e.y + 1) * TILE - cy, hx < (e.x + 0.5) * TILE) }); // faces the hero
+      if (e.kind === "merchant" && walk) {
+        const k = Math.min(1, (now - walk.t0) / KAEL_STEP_MS);
+        const [fx, fy] = walk.from;
+        const kx = (fx + (e.x - fx) * k + 0.5) * TILE;
+        const ky = (fy + (e.y - fy) * k + 1) * TILE;
+        const walking = k < 1 && !busy;
+        sprites.push({
+          y: k < 1 ? Math.max(fy, e.y) : e.y,
+          draw: () => person(sheets!.kael, walking ? "run" : "idle", Math.floor(anim / (walking ? 110 : 160)), kx - cx, ky - cy, walking ? e.x < fx : hx < kx),
+        });
+      }
       if (e.kind === "enemy")
         sprites.push({
           y: e.y,
@@ -555,6 +654,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     save = { ...save, progress: { ...save.progress, map: c.map } };
     pos = { x: c.x, y: c.y };
   }
+  startWalk(performance.now());
   show(main);
   resize();
   hud();

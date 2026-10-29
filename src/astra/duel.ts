@@ -360,7 +360,7 @@ export function duel(
       frame.append(button(`✦ ${CLASSES[b.classId].burst}`, () => commit({ type: "burst" }), { class: "burst", title: "Astra Burst" }));
   }
   function items() {
-    const usable = (Object.keys(ITEMS) as ItemId[]).filter((k) => b.items[k] > 0);
+    const usable = (Object.keys(ITEMS) as ItemId[]).filter((k) => b.items[k] > 0 && !("material" in ITEMS[k]));
     cmds.replaceChildren(
       ...usable.map((k) => {
         const why = illegal(b, { type: "item", item: k });

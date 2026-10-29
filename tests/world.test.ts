@@ -79,7 +79,7 @@ describe("forest_troubles quest", () => {
     expect(s.progress.quest.state).toBe("READY_TO_TURN_IN");
     expect(elaineNode(s).choices[0].id).toBe("claim");
     const done = claimQuestReward(s)!;
-    expect(done.gold).toBe(100);
+    expect(done.gold).toBe(s.gold + 100);
     expect(done.items.potion).toBe(s.items.potion + 2);
     expect(done.progress.quest.state).toBe("COMPLETED");
     expect(done.progress.claimed).toContain(QUEST_REWARD_ID);
@@ -112,7 +112,7 @@ describe("chests and saves", () => {
       savedAt: 1,
     };
     const s = parseSave(JSON.stringify(v1))!;
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(3);
     expect(s.progress).toMatchObject({ map: "oakheart_village", x: 16, y: 17, quest: { state: "AVAILABLE", kills: [] } });
   });
   const bad = (f: (s: SaveData) => unknown) => JSON.stringify(f(fresh()));

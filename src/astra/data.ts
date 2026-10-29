@@ -165,6 +165,8 @@ export const ITEMS = {
   water_flask: { name: "Water Flask", element: "water" as Element, power: 8 },
   frost_shard: { name: "Frost Shard", element: "ice" as Element, power: 8 },
   storm_vial: { name: "Storm Vial", element: "lightning" as Element, power: 8 },
+  /** Forest Wolf drop (LOOT_DROP_SYSTEM); a trade material, never usable in battle. */
+  wolf_pelt: { name: "Wolf Pelt", material: true },
 } as const;
 export type ItemId = keyof typeof ITEMS;
 export const STARTING_ITEMS: Record<ItemId, number> = {
@@ -172,6 +174,7 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   water_flask: 1,
   frost_shard: 1,
   storm_vial: 1,
+  wolf_pelt: 0,
 }; // PLACEHOLDER
 
 /** PLACEHOLDER: total EXP needed to reach each level (GDD: levels 1–3). */

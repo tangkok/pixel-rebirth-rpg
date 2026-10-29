@@ -11,6 +11,7 @@ import {
 } from "./data";
 import { checkName, effectiveStats } from "./hero";
 import { parseLook, type Look } from "./looks";
+import { KAEL_STOCK } from "./trade";
 import {
   CHECKPOINTS,
   MAP_IDS,
@@ -27,10 +28,10 @@ import {
 export const SAVE_KEY = "echoes-of-astra-save";
 export const BACKUP_KEY = "echoes-of-astra-save-backup";
 export const SETTINGS_KEY = "echoes-of-astra-settings";
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface SaveData {
-  version: 2;
+  version: 3;
   hero: {
     name: string;
     gender: Gender;
@@ -56,6 +57,8 @@ export interface SaveData {
     claimed: string[];
     quest: { state: QuestState; kills: string[] };
   };
+  /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
+  trade: { seq: number; kael: Partial<Record<ItemId, number>> };
   savedAt: number;
 }
 
@@ -88,9 +91,12 @@ export function newSave(
       claimed: [],
       quest: { state: "AVAILABLE", kills: [] },
     },
+    trade: freshTrade(),
     savedAt: Date.now(),
   };
 }
+
+const freshTrade = (): SaveData["trade"] => ({ seq: 0, kael: { ...KAEL_STOCK } });
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -115,6 +121,7 @@ export function parseSave(raw: string | null): SaveData | null {
   }
   if (!isObj(d)) return null;
   if (d.version === 1) d = migrateV1(d);
+  if (isObj(d) && d.version === 2) d = { ...d, version: 3, trade: freshTrade() };
   if (!isObj(d) || d.version !== SAVE_VERSION) return null;
   const { hero: h, items, progress: p } = d;
   if (!isObj(h) || !isObj(items) || !isObj(p)) return null;
@@ -158,6 +165,15 @@ export function parseSave(raw: string | null): SaveData | null {
   if ((state === "AVAILABLE" && kills.length) || (state === "ACTIVE" && kills.length >= 3)) return null;
   if ((state === "READY_TO_TURN_IN" || state === "COMPLETED") && kills.length !== 3) return null;
   if ((state === "COMPLETED") !== claimed.includes(QUEST_REWARD_ID)) return null;
+  const t = d.trade;
+  if (!isObj(t) || !isInt(t.seq, 0, 1e9) || !isObj(t.kael)) return null;
+  const stock = t.kael as Record<string, unknown>;
+  if (Object.keys(stock).some((k) => !(k in KAEL_STOCK))) return null;
+  const kael: Partial<Record<ItemId, number>> = {};
+  for (const [id, max] of Object.entries(KAEL_STOCK) as [ItemId, number][]) {
+    if (!isInt(stock[id] ?? 0, 0, max)) return null;
+    kael[id] = (stock[id] as number | undefined) ?? 0;
+  }
   if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
 
   return {
@@ -185,6 +201,7 @@ export function parseSave(raw: string | null): SaveData | null {
       claimed,
       quest: { state, kills },
     },
+    trade: { seq: t.seq, kael },
     savedAt: d.savedAt,
   };
 }

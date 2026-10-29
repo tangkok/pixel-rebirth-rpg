@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { SaveData } from "../../src/astra/save";
-import { MAPS, START, walkable, type MapId } from "../../src/astra/world";
+import { lootOf, MAPS, START, walkable, type MapId } from "../../src/astra/world";
 
 const SIZES = [
   { name: "phone portrait", width: 375, height: 667 },
@@ -81,27 +81,45 @@ async function fight(page: Page, key: keyof typeof KEY) {
   await back.click();
   await expect(world(page)).toBeVisible();
 }
-/** Shortest key path on the current village map to a tile where `goal` holds (BFS over the real map). */
-async function goTo(page: Page, goal: (x: number, y: number) => boolean) {
+type Goal = (x: number, y: number, kael: [number, number] | null) => boolean;
+/**
+ * Walks to a tile where `goal` holds, one step at a time: each step re-plans a shortest path
+ * (BFS over the real map) around wherever Kael is walking right now. Stops if the map changes.
+ */
+async function goTo(page: Page, goal: Goal) {
   const id = (await world(page).getAttribute("data-map")) as MapId;
-  const [sx, sy] = (await world(page).getAttribute("data-pos"))!.split(",").map(Number);
   const m = MAPS[id];
   const none = { progress: { defeated: [], claimed: [] } } as unknown as SaveData;
-  const prev = new Map<string, [string, string]>([[`${sx},${sy}`, ["", ""]]]);
-  const queue: [number, number][] = [[sx, sy]];
-  for (const [x, y] of queue) {
-    if (goal(x, y)) {
-      let path = "";
-      for (let k = `${x},${y}`; prev.get(k)![0]; k = prev.get(k)![0]) path = prev.get(k)![1] + path;
-      return walk(page, path);
+  for (let step = 0; step < 400; step++) {
+    const [map, at, k] = await world(page).evaluate((el) => [el.dataset.map, el.dataset.pos!, el.dataset.kael ?? ""]);
+    if (map !== id) return;
+    const [sx, sy] = at.split(",").map(Number);
+    const kael = k ? (k.split(",").map(Number) as [number, number]) : null;
+    const walkers = kael ? { npc_adventurer_kael: { x: kael[0], y: kael[1] } } : {};
+    const prev = new Map<string, [string, string]>([[`${sx},${sy}`, ["", ""]]]);
+    const queue: [number, number][] = [[sx, sy]];
+    let first = "";
+    for (const [x, y] of queue) {
+      if (goal(x, y, kael)) {
+        for (let key = `${x},${y}`; prev.get(key)![0]; key = prev.get(key)![0]) first = prev.get(key)![1];
+        if (!first) return; // already there
+        break;
+      }
+      if (m.exits.some((e) => e.x === x && e.y === y) && !(x === sx && y === sy)) continue; // leaving ends the route
+      for (const [c, dx, dy] of [["L", -1, 0], ["R", 1, 0], ["U", 0, -1], ["D", 0, 1]] as const) {
+        const key = `${x + dx},${y + dy}`;
+        if (prev.has(key) || !walkable(m, none, x + dx, y + dy, walkers)) continue;
+        prev.set(key, [`${x},${y}`, c]);
+        queue.push([x + dx, y + dy]);
+      }
     }
-    if (m.exits.some((e) => e.x === x && e.y === y) && !(x === sx && y === sy)) continue; // leaving ends the route
-    for (const [c, dx, dy] of [["L", -1, 0], ["R", 1, 0], ["U", 0, -1], ["D", 0, 1]] as const) {
-      const k = `${x + dx},${y + dy}`;
-      if (prev.has(k) || !walkable(m, none, x + dx, y + dy)) continue;
-      prev.set(k, [`${x},${y}`, c]);
-      queue.push([x + dx, y + dy]);
+    if (!first) {
+      await page.waitForTimeout(200); // boxed in by Kael for a moment
+      continue;
     }
+    await page.keyboard.press(KEY[first as keyof typeof KEY]);
+    // Kael may have stepped in the way; then the hero only turns and the next loop re-plans.
+    await page.waitForFunction((b) => document.querySelector<HTMLElement>("main.world")?.dataset.pos !== b, at, { timeout: 1000 }).catch(() => {});
   }
   throw new Error("no route");
 }
@@ -110,7 +128,13 @@ const near = (kind: string) => {
   const e = village.entities.find((x) => x.kind === kind)!;
   return (x: number, y: number) => Math.abs(x - e.x) + Math.abs(y - e.y) === 1;
 };
-const toElaine = (page: Page) => goTo(page, near("npc"));
+/** Next to Elaine and turned to face her, so a passing Kael is never the one spoken to. */
+async function toElaine(page: Page) {
+  await goTo(page, near("npc"));
+  const e = village.entities.find((x) => x.kind === "npc")!;
+  const [x, y] = (await world(page).getAttribute("data-pos"))!.split(",").map(Number);
+  await page.keyboard.press(e.x < x ? "ArrowLeft" : e.x > x ? "ArrowRight" : e.y < y ? "ArrowUp" : "ArrowDown");
+}
 /** Through the village's east exit into the forest at (1,8). */
 async function toForest(page: Page) {
   const exit = village.exits[0];
@@ -161,9 +185,11 @@ test("full forest_troubles loop survives reloads without duplicate credit", asyn
   await page.keyboard.press("e");
   await page.getByRole("button", { name: /รับรางวัล/ }).dblclick();
   await expect(world(page)).toHaveAttribute("data-quest", "COMPLETED");
-  await expect(page.locator(".hud-stats")).toContainText("100 G");
+  const loot = ["forest_wolf_1", "forest_wolf_2", "forest_wolf_3"].reduce((g, id) => g + lootOf("forest_wolf", id)!.gold, 0);
+  await expect(page.locator(".hud-stats")).toContainText(`${100 + loot} G`);
   const done = await saved(page);
-  expect(done.gold).toBe(100);
+  expect(done.gold).toBe(100 + loot);
+  expect(done.items.wolf_pelt).toBe(3);
   expect(done.items.potion).toBe(before + 2); // reward added once on top of what the fights left
   expect(done.hero.level).toBe(2); // 60 EXP (PLACEHOLDER curve 0/30/80)
 
@@ -172,7 +198,53 @@ test("full forest_troubles loop survives reloads without duplicate credit", asyn
   await page.keyboard.press("e");
   await expect(page.getByRole("dialog")).toContainText("ขอบคุณอีกครั้ง");
   await page.getByRole("button", { name: "ปิด" }).click();
-  expect((await saved(page)).gold).toBe(100);
+  expect((await saved(page)).gold).toBe(100 + loot);
+});
+
+test("Kael walks the plaza, stops to trade, and trades survive a reload", async ({ page }) => {
+  await newHero(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("echoes-of-astra-save")!);
+    s.gold = 100;
+    s.items.wolf_pelt = 2;
+    localStorage.setItem("echoes-of-astra-save", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  const first = await world(page).getAttribute("data-kael");
+  await expect(world(page)).not.toHaveAttribute("data-kael", first!, { timeout: 5000 }); // he walks
+
+  const dialog = page.getByRole("dialog");
+  for (let tries = 0; tries < 10 && !(await dialog.isVisible()); tries++) {
+    await goTo(page, (x, y, k) => !!k && Math.abs(x - k[0]) + Math.abs(y - k[1]) === 1);
+    if ((await page.locator(".act").textContent()) === "คุย") await page.keyboard.press("e");
+  }
+  await expect(dialog).toContainText("Kael");
+  const at = await world(page).getAttribute("data-kael");
+  await page.waitForTimeout(1500);
+  await expect(world(page)).toHaveAttribute("data-kael", at!); // paused while spoken to
+  await expectNoScroll(page);
+
+  await page.getByRole("button", { name: "Buy ซื้อ" }).click();
+  await expect(dialog).toContainText("Kael มี 3");
+  await page.getByRole("button", { name: "ซื้อ Wolf Pelt ×1" }).dblclick(); // double tap = one trade
+  await expect(dialog).toContainText("Kael มี 2");
+  let s = await saved(page);
+  expect([s.gold, s.items.wolf_pelt, s.trade.kael.wolf_pelt, s.trade.seq]).toEqual([76, 3, 2, 1]);
+  await page.getByRole("button", { name: "กลับ", exact: true }).click();
+  await page.getByRole("button", { name: "Sell ขาย" }).click();
+  await page.getByRole("button", { name: "ขาย Wolf Pelt ×1" }).click();
+  await expect(dialog).toContainText("คุณมี 2");
+  await page.getByRole("button", { name: "กลับ", exact: true }).click();
+  await page.getByRole("button", { name: "Leave ไปก่อน" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(world(page)).not.toHaveAttribute("data-kael", at!, { timeout: 5000 }); // resumes his loop
+
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".hud-stats")).toContainText("88 G");
+  s = await saved(page);
+  expect([s.gold, s.items.wolf_pelt, s.trade.kael.wolf_pelt, s.trade.seq]).toEqual([88, 2, 2, 2]);
 });
 
 test("crystal saves and the chest opens once", async ({ page }) => {
