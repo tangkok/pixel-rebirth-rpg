@@ -93,17 +93,6 @@ export function layers(l: Look, classId: ClassId): Layer[] {
   ];
 }
 
-/** Front/back walk atlases (original art by scripts/draw-front-back.py): per variant a down row then an up row. */
-export const FB = { w: 40, h: 40, frames: 4, foot: { x: 20, y: 33 } } as const;
-export function fbLayers(l: Look): Layer[] {
-  return [
-    ["fb/skin.png", l.skin - 1],
-    [`fb/cloth/cloth${l.outfit}.png`, l.outfitColor - 1],
-    ["fb/face.png", l.face - 1],
-    [`fb/hair/${l.hair}.png`, l.hairColor - 1],
-  ];
-}
-
 const inList = <T>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
 
 /** Validates an untrusted look for the given gender; null if any field is unknown. */

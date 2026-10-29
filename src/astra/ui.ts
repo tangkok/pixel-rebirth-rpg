@@ -1,5 +1,5 @@
 import type { ClassId } from "./data";
-import { ANIM_ROWS, ANIMS, FB, fbLayers, FRAME_H, FRAME_W, layers, STRIP_W, type Look } from "./looks";
+import { ANIM_ROWS, ANIMS, FRAME_H, FRAME_W, layers, STRIP_W, type Look } from "./looks";
 import { parseSettings, SETTINGS_KEY, type Settings } from "./save";
 
 export const root = document.querySelector<HTMLElement>("#astra")!;
@@ -84,25 +84,6 @@ export function composite(look: Look, classId: ClassId) {
       const c = h("canvas", { width: STRIP_W, height: h2 });
       const ctx = c.getContext("2d")!;
       imgs.forEach((img, i) => ctx.drawImage(img, 0, parts[i][1] * h2, STRIP_W, h2, 0, 0, STRIP_W, h2));
-      return c;
-    });
-    p.catch(() => sheets.delete(key));
-    sheets.set(key, p);
-  }
-  return p;
-}
-
-/** Front/back walk sheet: row 0 walks down, row 1 walks up. */
-export function compositeFB(look: Look) {
-  const parts = fbLayers(look);
-  const key = "fb|" + parts.join("|");
-  let p = sheets.get(key);
-  if (!p) {
-    p = Promise.all(parts.map(([src]) => loadImage(src))).then((imgs) => {
-      const [w, h2] = [FB.w * FB.frames, FB.h * 2];
-      const c = h("canvas", { width: w, height: h2 });
-      const ctx = c.getContext("2d")!;
-      imgs.forEach((img, i) => ctx.drawImage(img, 0, parts[i][1] * h2, w, h2, 0, 0, w, h2));
       return c;
     });
     p.catch(() => sheets.delete(key));
