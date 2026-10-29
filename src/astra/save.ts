@@ -10,6 +10,7 @@ import {
   type ItemId,
 } from "./data";
 import { checkName, effectiveStats } from "./hero";
+import { parseLook, type Look } from "./looks";
 
 export const SAVE_KEY = "echoes-of-astra-save";
 export const BACKUP_KEY = "echoes-of-astra-save-backup";
@@ -23,6 +24,7 @@ export interface SaveData {
     gender: Gender;
     classId: ClassId;
     talentId: string;
+    look: Look;
     level: number;
     exp: number;
     hp: number;
@@ -50,11 +52,12 @@ export function newSave(
   gender: Gender,
   classId: ClassId,
   talentId: string,
+  look: Look,
 ): SaveData {
   const s = effectiveStats(classId, talentId);
   return {
     version: SAVE_VERSION,
-    hero: { name, gender, classId, talentId, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp },
+    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp },
     items: { ...STARTING_ITEMS },
     progress: { map: "oakheart_village", x: 4, y: 10, checkpoint: "oakheart_square", defeated: [] }, // PLACEHOLDER spawn
     savedAt: Date.now(),
@@ -85,6 +88,8 @@ export function parseSave(raw: string | null): SaveData | null {
   if (!GENDERS.includes(h.gender as Gender)) return null;
   if (!CLASS_IDS.includes(h.classId as ClassId)) return null;
   if (typeof h.talentId !== "string" || !talentById(h.talentId)) return null;
+  const look = parseLook(h.look, h.gender as Gender);
+  if (!look) return null;
   if (!isInt(h.level, 1, MAX_LEVEL) || !isInt(h.exp, 0, 1e7)) return null;
   const max = effectiveStats(h.classId as ClassId, h.talentId);
   // Level-up growth is not designed yet, so caps use the level 1 maximum.
@@ -116,6 +121,7 @@ export function parseSave(raw: string | null): SaveData | null {
       gender: h.gender as Gender,
       classId: h.classId as ClassId,
       talentId: h.talentId,
+      look,
       level: h.level,
       exp: h.exp,
       hp: h.hp,

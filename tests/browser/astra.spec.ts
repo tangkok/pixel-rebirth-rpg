@@ -24,15 +24,35 @@ async function expectNoScroll(page: Page) {
   expect(m.offscreen).toEqual([]);
 }
 
+async function expectSpriteDrawn(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const c = document.querySelector<HTMLCanvasElement>("canvas.sprite")!;
+        const px = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+        return px.some((v, i) => i % 4 === 3 && v > 0);
+      }),
+    )
+    .toBe(true);
+}
+
 async function create(page: Page, name: string, check = false) {
   await page.getByRole("button", { name: "New Game" }).click();
   if (check) await expectNoScroll(page);
   await page.locator("#hero-name").fill(name);
   await page.getByRole("button", { name: "หญิง" }).click();
-  await page.getByRole("button", { name: "ถัดไป" }).click();
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   await page.getByRole("button", { name: "Ranger" }).click();
   if (check) await expectNoScroll(page);
-  await page.getByRole("button", { name: "ถัดไป" }).click();
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await page.getByRole("button", { name: "ทรงผม ถัดไป" }).click();
+  await page.getByRole("button", { name: "ทรงผม ถัดไป" }).click();
+  await page.getByRole("button", { name: "อาวุธ ก่อนหน้า" }).click();
+  await expect(page.locator(".cycle output").last()).toHaveText("คทา 4");
+  await expect(page.locator(".hint")).toContainText("ธนู");
+  await expectSpriteDrawn(page);
+  if (check) await expectNoScroll(page);
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   for (let i = 0; i < 3; i++) await page.locator(".draw .btn").click();
   await expect(page.locator(".draw .btn")).toBeDisabled();
   await expect(page.getByRole("radio")).toHaveCount(3);
@@ -40,7 +60,7 @@ async function create(page: Page, name: string, check = false) {
   await page.getByRole("radio").nth(1).click();
   await expect(page.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
   const chosen = await page.getByRole("radio").nth(1).locator("b").textContent();
-  await page.getByRole("button", { name: "ถัดไป" }).click();
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   if (check) await expectNoScroll(page);
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
   return chosen!;
@@ -70,6 +90,9 @@ test("Continue restores the hero and chosen talent after refresh", async ({ page
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.locator(".hero-name")).toHaveText("สวย");
   await expect(page.locator(".meta")).toContainText(`Ranger · ${talent}`);
+  const look = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero.look);
+  expect(look).toMatchObject({ hair: "f3", weapon: "weapon5_c4", outfit: 11 });
+  await expectSpriteDrawn(page);
 });
 
 test("New Game asks before overwriting a save and Cancel keeps it", async ({ page }) => {
@@ -83,7 +106,7 @@ test("New Game asks before overwriting a save and Cancel keeps it", async ({ pag
 
 test("names are validated and rendered as text", async ({ page }) => {
   await page.getByRole("button", { name: "New Game" }).click();
-  const next = page.getByRole("button", { name: "ถัดไป" });
+  const next = page.getByRole("button", { name: "ถัดไป", exact: true });
   await expect(next).toBeDisabled();
   await page.locator("#hero-name").fill("ก".repeat(17));
   await expect(next).toBeDisabled();

@@ -180,6 +180,9 @@ p {
 }
 .steps li {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 0.3em 0.2em;
   text-align: center;
   color: var(--muted);
@@ -213,33 +216,20 @@ p {
   background: linear-gradient(#22406b, #142742 60%, #1f3a24 60%, #142a1a);
 }
 .sprite {
-  --k: 1;
   position: absolute;
   left: 50%;
   top: 50%;
-  width: calc(100px * var(--k));
-  height: calc(40px * var(--k));
+  width: calc(100px * var(--k, 1));
+  height: calc(40px * var(--k, 1));
   translate: -50% -50%;
-  background-image: var(--sheet);
-  background-size: calc(800px * var(--k)) calc(680px * var(--k));
   image-rendering: pixelated;
-  animation: idle 0.8s steps(6) infinite;
 }
-.sprite-box .sprite {
-  --k: inherit;
-}
-@keyframes idle {
-  to {
-    background-position-x: calc(-600px * var(--k));
-  }
-}
-.reduced .sprite {
-  animation: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sprite {
-    animation: none;
-  }
+.sprite-box.missing::after {
+  content: "โหลดภาพไม่สำเร็จ";
+  position: absolute;
+  inset: auto 0 0.4em;
+  text-align: center;
+  color: var(--muted);
 }
 .panel {
   grid-area: panel;
@@ -321,6 +311,38 @@ footer.row {
 }
 .stats .down dd {
   color: var(--down);
+}
+.looks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10em, 1fr));
+  gap: 0.3em 0.6em;
+}
+.cycle {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 0.2em;
+}
+.cycle .btn {
+  padding: 0;
+  font-size: 1.5em;
+  line-height: 1;
+}
+.cycle .mid {
+  display: grid;
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cycle small {
+  color: var(--muted);
+  font-size: 0.75em;
+}
+.cycle output {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .draw {
   flex-wrap: nowrap;

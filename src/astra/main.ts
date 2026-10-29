@@ -25,6 +25,26 @@ import {
   type SaveData,
   type Settings,
 } from "./save";
+import {
+  CLASS_LOOK,
+  CLASS_WEAPON_MISSING,
+  defaultLook,
+  FACES,
+  FRAME_H,
+  FRAME_W,
+  HAIR_COLORS,
+  HAIR_STYLES,
+  IDLE_FRAMES,
+  layers,
+  OUTFIT_COLORS,
+  OUTFITS,
+  SHEET_H,
+  SHEET_W,
+  SKINS,
+  WEAPON_LABEL,
+  WEAPONS,
+  type Look,
+} from "./looks";
 
 const root = document.querySelector<HTMLElement>("#astra")!;
 
@@ -71,19 +91,72 @@ const button = (label: string, onclick: () => void, extra: Partial<HTMLButtonEle
   h("button", { type: "button", onclick, ...extra, class: `btn ${extra.class ?? ""}` }, label);
 
 function show(...nodes: Node[]) {
+  // Re-renders keep keyboard focus on the same control (matched by its aria-label).
+  const prev = document.activeElement?.getAttribute("aria-label");
   root.replaceChildren(...nodes);
-  root.querySelector<HTMLElement>("[autofocus], .btn:not(:disabled)")?.focus({ preventScroll: true });
+  const same = prev ? root.querySelector<HTMLElement>(`[aria-label="${CSS.escape(prev)}"]`) : null;
+  (same ?? root.querySelector<HTMLElement>("[autofocus], .btn:not(:disabled)"))?.focus({ preventScroll: true });
   fitSprites();
 }
 
-// ---------- hero sprite ----------
-const sheet = (c: ClassId, g: Gender) => `heroes/${c}_${g}.png`;
+// ---------- hero sprite (Heroes99 layers composited in the browser) ----------
+const images = new Map<string, Promise<HTMLImageElement>>();
+const loadImage = (src: string) => {
+  let p = images.get(src);
+  if (!p) {
+    p = new Promise((ok, fail) => {
+      const img = new Image();
+      img.onload = () => ok(img);
+      img.onerror = () => fail(new Error(src));
+      img.src = src;
+    });
+    p.catch(() => images.delete(src)); // allow a retry after a failed load
+    images.set(src, p);
+  }
+  return p;
+};
 
-function heroSprite(c: ClassId | null, g: Gender, label: string) {
-  const el = h("div", { class: "sprite-box", aria: { label }, role: "img" } as never);
-  if (c) el.append(h("div", { class: "sprite" }));
-  el.style.setProperty("--sheet", c ? `url("${sheet(c, g)}")` : "none");
-  return el;
+const sheets = new Map<string, Promise<HTMLCanvasElement>>();
+function composite(look: Look) {
+  const key = layers(look).join("|");
+  let p = sheets.get(key);
+  if (!p) {
+    p = Promise.all(layers(look).map(loadImage)).then((imgs) => {
+      const c = h("canvas", { width: SHEET_W, height: SHEET_H });
+      const ctx = c.getContext("2d")!;
+      for (const img of imgs) ctx.drawImage(img, 0, 0);
+      return c;
+    });
+    p.catch(() => sheets.delete(key));
+    sheets.set(key, p);
+  }
+  return p;
+}
+
+const still = () => settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function heroSprite(look: Look, label: string) {
+  const canvas = h("canvas", { class: "sprite", width: FRAME_W, height: FRAME_H });
+  const box = h("div", { class: "sprite-box", role: "img", aria: { label } } as never, canvas);
+  const ctx = canvas.getContext("2d")!;
+  composite(look).then(
+    (sheet) => {
+      let f = 0;
+      const draw = () => {
+        ctx.clearRect(0, 0, FRAME_W, FRAME_H);
+        ctx.drawImage(sheet, f * FRAME_W, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
+      };
+      draw();
+      const timer = setInterval(() => {
+        if (!canvas.isConnected) return clearInterval(timer);
+        if (still()) return;
+        f = (f + 1) % IDLE_FRAMES;
+        draw();
+      }, 130);
+    },
+    () => box.classList.add("missing"),
+  );
+  return box;
 }
 
 /** Integer pixel scale so the 100×40 frame stays crisp and fits its box. */
@@ -98,15 +171,8 @@ addEventListener("resize", fitSprites);
 // ---------- boot ----------
 async function boot() {
   show(h("main", { class: "screen center" }, h("p", { class: "loading" }, "กำลังโหลด…")));
-  const load = (src: string) =>
-    new Promise<void>((ok, fail) => {
-      const img = new Image();
-      img.onload = () => ok();
-      img.onerror = () => fail(new Error(src));
-      img.src = src;
-    });
   try {
-    await Promise.all(CLASS_IDS.flatMap((c) => [load(sheet(c, "male")), load(sheet(c, "female"))]));
+    await composite(defaultLook("male", "knight"));
     title();
   } catch {
     show(
@@ -207,26 +273,35 @@ function settingsPanel(back: () => void) {
 
 // ---------- character creation ----------
 interface Draft {
-  step: 0 | 1 | 2 | 3;
+  step: 0 | 1 | 2 | 3 | 4;
   name: string;
   gender: Gender;
   classId: ClassId | null;
+  look: Look;
   draws: TalentDef[];
   pick: number | null;
 }
 
-const STEPS = ["ตัวตน", "อาชีพ", "พรสวรรค์", "ยืนยัน"];
+const STEPS = ["ตัวตน", "อาชีพ", "รูปลักษณ์", "พรสวรรค์", "ยืนยัน"];
 
 function creation() {
   // shortcut: draws live only in memory (GDD's "simplest MVP"); a refresh mid-creation restarts the rolls.
-  const d: Draft = { step: 0, name: "", gender: "male", classId: null, draws: [], pick: null };
+  const d: Draft = {
+    step: 0,
+    name: "",
+    gender: "male",
+    classId: null,
+    look: defaultLook("male", "knight"),
+    draws: [],
+    pick: null,
+  };
   const nameCheck = () => checkName(d.name);
   const canNext = () =>
-    [nameCheck().ok, d.classId !== null, d.pick !== null, true][d.step];
+    [nameCheck().ok, d.classId !== null, true, d.pick !== null, true][d.step];
 
   const render = () => {
     const footerNext =
-      d.step < 3
+      d.step < 4
         ? button("ถัดไป", () => go(1), { class: "primary", disabled: !canNext() })
         : button("เริ่มการผจญภัย", start, { class: "primary" });
     show(
@@ -240,7 +315,7 @@ function creation() {
             h("li", { class: i === d.step ? "on" : i < d.step ? "done" : "", aria: i === d.step ? { current: "step" } : {} }, `${i + 1}. ${s}`),
           ),
         ),
-        heroSprite(d.classId ?? "knight", d.gender, "ตัวอย่างฮีโร่"),
+        heroSprite(d.look, "ตัวอย่างฮีโร่"),
         h("section", { class: "panel", aria: { label: STEPS[d.step] } }, ...stepBody()),
         h(
           "footer",
@@ -286,7 +361,11 @@ function creation() {
           "div",
           { class: "row seg", role: "group", aria: { label: "เพศ" } },
           ...(["male", "female"] as Gender[]).map((g) =>
-            button(g === "male" ? "ชาย" : "หญิง", () => ((d.gender = g), render()), {
+            button(g === "male" ? "ชาย" : "หญิง", () => {
+              if (d.gender !== g) d.look = { ...d.look, hair: HAIR_STYLES[g][0] };
+              d.gender = g;
+              render();
+            }, {
               aria: { pressed: String(d.gender === g) },
             }),
           ),
@@ -300,7 +379,11 @@ function creation() {
           "div",
           { class: "classes", role: "group", aria: { label: "อาชีพ" } },
           ...CLASS_IDS.map((c) =>
-            button(CLASSES[c].name, () => ((d.classId = c), render()), {
+            button(CLASSES[c].name, () => {
+              d.classId = c;
+              d.look = { ...d.look, ...CLASS_LOOK[c] }; // class starting outfit and weapon
+              render();
+            }, {
               aria: { pressed: String(d.classId === c) },
             }),
           ),
@@ -309,6 +392,37 @@ function creation() {
       ];
     }
     if (d.step === 2) {
+      const cycle = <K extends keyof Look>(label: string, key: K, list: readonly Look[K][], text = (v: Look[K], i: number) => `${i + 1} / ${list.length}`) => {
+        const i = Math.max(0, list.indexOf(d.look[key]));
+        const set = (n: number) => {
+          d.look = { ...d.look, [key]: list[(i + n + list.length) % list.length] };
+          render();
+        };
+        return h(
+          "div",
+          { class: "cycle" },
+          button("‹", () => set(-1), { aria: { label: `${label} ก่อนหน้า` } }),
+          h("span", { class: "mid" }, h("small", {}, label), h("output", { aria: { live: "polite" } }, text(d.look[key], i))),
+          button("›", () => set(1), { aria: { label: `${label} ถัดไป` } }),
+        );
+      };
+      const missing = d.classId && CLASS_WEAPON_MISSING[d.classId];
+      return [
+        h(
+          "div",
+          { class: "looks" },
+          cycle("ผิว", "skin", SKINS),
+          cycle("ใบหน้า", "face", FACES),
+          cycle("ทรงผม", "hair", HAIR_STYLES[d.gender]),
+          cycle("สีผม", "hairColor", HAIR_COLORS),
+          cycle("ชุด", "outfit", OUTFITS),
+          cycle("สีชุด", "outfitColor", OUTFIT_COLORS),
+          cycle("อาวุธ", "weapon", WEAPONS, (v) => WEAPON_LABEL[v]),
+        ),
+        missing && h("p", { class: "hint" }, `Heroes99 ยังไม่มี${missing} เลือกอาวุธอื่นแทนชั่วคราวได้ (ภาพ placeholder)`),
+      ];
+    }
+    if (d.step === 3) {
       const left = MAX_TALENT_DRAWS - d.draws.length;
       return [
         h(
@@ -343,7 +457,7 @@ function creation() {
   function start() {
     const name = nameCheck();
     if (!name.ok || !d.classId || d.pick === null) return;
-    const save = newSave(name.name, d.gender, d.classId, d.draws[d.pick].id);
+    const save = newSave(name.name, d.gender, d.classId, d.draws[d.pick].id, d.look);
     adventure(save, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
   }
 
@@ -401,7 +515,7 @@ function adventure(save: SaveData, notice = "") {
       "main",
       { class: "screen create" },
       h("header", { class: "area" }, h("b", {}, "Oakheart Village"), h("span", { role: "status" }, notice)),
-      heroSprite(hero.classId, hero.gender, `${hero.name} ${CLASSES[hero.classId].name}`),
+      heroSprite(hero.look, `${hero.name} ${CLASSES[hero.classId].name}`),
       h(
         "section",
         { class: "panel" },
