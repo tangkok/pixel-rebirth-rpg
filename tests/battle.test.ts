@@ -146,11 +146,13 @@ describe("Perfect Strike / Guard (§3–4)", () => {
       expect(e).toMatchObject({ damage: damage(base, mod), timing: t, astra });
     }
   });
-  it("Defend and Perfect Guard stack multiplicatively and guard grants Astra", () => {
+  it("Perfect Guard blocks all damage, Good stacks with Defend, and guard grants Astra", () => {
     const b = fight("ranger");
     const bite = physicalBase(13, 4, heroStats(b).def);
     const r = run(b, { type: "defend" }, "normal", "perfect");
-    expect(hits(r.events, "foe")[0]).toMatchObject({ damage: damage(bite, 0.5, 0.4), astra: 15 });
+    expect(hits(r.events, "foe")[0]).toMatchObject({ damage: 0, astra: 15 }); // Perfect blocks fully
+    expect(hits(run(b, { type: "attack" }, "normal", "perfect").events, "foe")[0].damage).toBe(0);
+    expect(hits(run(b, { type: "defend" }, "normal", "good").events, "foe")[0].damage).toBe(damage(bite, 0.5, 0.75));
     expect(hits(run(b, { type: "defend" }, "normal", "good").events, "foe")[0].astra).toBe(10);
     expect(hits(run(b, { type: "defend" }).events, "foe")[0].astra).toBe(3);
   });

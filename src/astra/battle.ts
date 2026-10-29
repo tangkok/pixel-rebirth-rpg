@@ -22,7 +22,8 @@ export const INTENTS: Record<IntentId, { name: string; thai: string; power: numb
 export const TIMING = {
   windowMs: { perfect: 80, good: 180 },
   strike: { perfect: [1.2, 15], good: [1.1, 10], normal: [1, 5] },
-  guard: { perfect: [0.4, 15], good: [0.75, 10], normal: [1, 3] },
+  // Owner change to COMBAT_SPEC §4 (was ×0.40): a Perfect Guard blocks the hit completely.
+  guard: { perfect: [0, 15], good: [0.75, 10], normal: [1, 3] },
 } as const;
 export const judge = (offsetMs: number): Timing =>
   Math.abs(offsetMs) <= TIMING.windowMs.perfect ? "perfect" : Math.abs(offsetMs) <= TIMING.windowMs.good ? "good" : "normal";
@@ -308,7 +309,7 @@ export function guard(prev: BattleState, actionId: string, timing: Timing = "nor
   const atk = b.foe.weak ? Math.floor((fs.atk * 85) / 100) : fs.atk;
   b.foe.weak = false;
   const low = b.hero.hp * 10 < hs.maxHp * 3; // own HP before this hit
-  const dmg = Math.min(
+  const dmg = timing === "perfect" ? 0 : Math.min(
     b.hero.hp,
     damage(
       physicalBase(atk, intent.power, hs.def),

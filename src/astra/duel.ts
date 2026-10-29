@@ -112,7 +112,7 @@ export function duel(
         { class: "hint" },
         settings.autoTiming || still()
           ? "Auto Timing: ทุกจังหวะนับเป็น Normal (เปลี่ยนได้ใน Settings)"
-          : "แตะจอหรือกด Space ตอนวงแหวนหดตรงกัน · โจมตี Perfect ×1.2 · ป้องกัน Perfect ×0.4 · Astra เต็ม 100 ใช้ Burst",
+          : "แตะจอหรือกด Space ตอนวงแหวนหดตรงกัน · โจมตี Perfect ×1.2 · ป้องกัน Perfect ไม่เสีย HP · Astra เต็ม 100 ใช้ Burst",
       ),
       cmds,
     ),
@@ -352,7 +352,7 @@ export function duel(
           fx.push({ who: e.by, kind: "strike", t0: now }, { who: e.by === "hero" ? "foe" : "hero", kind: "hurt", t0: now + 160 });
           const tag = [e.timing && TIMING_TAG[e.timing] && `${TIMING_TAG[e.timing]}${e.by === "foe" ? " Guard" : ""}`, e.reaction && REACTIONS[e.reaction]].filter(Boolean).join(" · ");
           const freeze = e.reaction === "freeze" ? ` · ${foe.name} ถูกแช่แข็ง!` : "";
-          say(`${who(e.by)} ใช้ ${e.name}${tag ? ` · ${tag}` : ""} · ${e.damage} ดาเมจ${freeze}`, `${tag ? `${tag} ` : ""}-${e.damage}`, e.by === "hero" ? "at-foe" : "at-hero");
+          say(`${who(e.by)} ใช้ ${e.name}${tag ? ` · ${tag}` : ""} · ${e.damage} ดาเมจ${freeze}`, e.damage ? `${tag ? `${tag} ` : ""}-${e.damage}` : `${tag} Block!`, e.by === "hero" ? "at-foe" : "at-hero");
         } else if (e.type === "heal") {
           heroHp = e.hp;
           say(`${e.name} ฟื้นฟู ${e.amount} HP`, `+${e.amount}`, "at-hero heal");
