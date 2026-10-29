@@ -5,6 +5,23 @@ import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
+import {
+  beside,
+  browse,
+  checkout,
+  nextSaleId,
+  PRICE_TIERS,
+  priceOf,
+  SHELF_CAP,
+  SHOP,
+  setOpen,
+  setTier,
+  shopUnlocked,
+  stepToward,
+  stockShelf,
+  unstockShelf,
+  type Result,
+} from "./shop";
 import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
 import { button, composite, crisp, h, settings, show, still, store } from "./ui";
 import {
@@ -24,6 +41,8 @@ import {
   recordVictory,
   routeTiles,
   setCheckpoint,
+  SHELF_IDS,
+  SHOP_MAP,
   STEP,
   TILE,
   tileAt,
@@ -31,6 +50,8 @@ import {
   walkable,
   type Dir,
   type Entity,
+  type MapId,
+  type ShelfId,
   type Walkers,
 } from "./world";
 
@@ -44,6 +65,9 @@ const ELAINE: Look = { skin: 2, face: 3, hair: "f4", hairColor: 6, outfit: 11, o
 const KAEL_LOOK: Look = { skin: 1, face: 2, hair: "m6", hairColor: 3, outfit: 4, outfitColor: 5 };
 const KAEL_STEP_MS = 420;
 const KAEL_PAUSE_MS = 1400; // stops at each corner of his loop to look around
+// A hunter customer (SHOP §5 archetype that wants pelts).
+const CUSTOMER_LOOK: Look = { skin: 1, face: 5, hair: "m3", hairColor: 8, outfit: 6, outfitColor: 7 };
+const CUSTOMER_STEP_MS = 380;
 const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId);
 const HERO_FOOT = { x: 41, y: 34 }; // feet of the Heroes99 body inside its 100x40 frame
 
@@ -90,6 +114,7 @@ const LAMPS = Object.fromEntries(
 const MOOD = {
   oakheart_village: { rays: "255,210,140" },
   whispering_forest: { rays: "220,255,200" },
+  oakheart_player_shop_interior: { rays: "255,200,150" },
 } as const;
 
 export function explore(start: SaveData, toTitle: (notice?: string) => void, notice = "") {
@@ -183,6 +208,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     main.dataset.map = save.progress.map;
     main.dataset.pos = `${pos.x},${pos.y}`;
     main.dataset.quest = save.progress.quest.state;
+    main.dataset.shop = save.shop.open ? "open" : "closed";
   }
   let toastTimer = 0;
   function toast(msg: string) {
@@ -201,25 +227,35 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     const ny = pos.y + STEP[d][1];
     const e = entityAt(map(), save, nx, ny, walkers);
     if (e?.kind === "enemy") return encounter(e);
-    if (!walkable(map(), save, nx, ny, walkers)) return refreshTarget();
+    if (!walkable(map(), save, nx, ny, walkers) || (visit && visit.x === nx && visit.y === ny)) return refreshTarget();
     move = { fx: pos.x, fy: pos.y, t0: performance.now() };
     pos = { x: nx, y: ny };
   }
   function arrive() {
     move = null;
     const exit = map().exits.find((x) => x.x === pos.x && x.y === pos.y);
-    if (exit) {
-      pos = { x: exit.ax, y: exit.ay };
-      commit({ ...save, progress: { ...save.progress, map: exit.to } }, `เข้าสู่ ${MAPS[exit.to].name}`);
-      startWalk(performance.now());
-    }
+    if (exit) travel(exit.to, exit.ax, exit.ay);
     hud();
+    refreshTarget();
+  }
+
+  /** Moves to another map in one commit; leaving an open, unstaffed shop closes it (§3.5). */
+  function travel(to: MapId, ax: number, ay: number) {
+    const closing = save.progress.map === SHOP_MAP && save.shop.open;
+    pos = { x: ax, y: ay };
+    visit = null;
+    const next = closing ? setOpen(save, false) : save;
+    commit({ ...next, progress: { ...next.progress, map: to } }, `เข้าสู่ ${MAPS[to].name}${closing ? " · ปิดร้านแล้ว (ไม่มีพนักงาน)" : ""}`);
+    startWalk(performance.now());
+    resize();
     refreshTarget();
   }
 
   // ---------- interaction ----------
   let target: Entity | null = null;
-  const ACT_LABEL: Record<Entity["kind"], string> = { npc: "คุย", merchant: "คุย", crystal: "บันทึก", chest: "เปิดหีบ", sign: "อ่าน", enemy: "สู้" };
+  const ACT_LABEL: Record<Entity["kind"], string> = { npc: "คุย", merchant: "คุย", crystal: "บันทึก", chest: "เปิดหีบ", sign: "อ่าน", enemy: "สู้",
+    door: "เข้าร้าน", shelf: "ชั้นวาง", counter: "เคาน์เตอร์",
+  };
   function refreshTarget() {
     target = busy ? null : interactTarget(map(), save, pos.x, pos.y, dir, walkers);
     act.hidden = !target;
@@ -233,12 +269,19 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (t.kind === "enemy") return encounter(t);
     if (t.kind === "npc") return talkElaine();
     if (t.kind === "merchant") return kaelMenu();
+    if (t.kind === "door") {
+      if (!shopUnlocked(save)) return talk("General Store", "ร้านนี้ยังว่างอยู่ ช่วย Elaine กำจัดหมาป่าในป่าให้เสร็จก่อน แล้วร้านนี้จะเป็นของคุณ", [["ปิด", close]]);
+      return travel(t.to, t.ax, t.ay);
+    }
+    if (t.kind === "shelf") return shelfPanel(t.id);
+    if (t.kind === "counter") return counterPanel();
     if (t.kind === "sign") return talk("ป้าย", t.text, [["ปิด", close]]);
     if (t.kind === "crystal")
       return talk("คริสตัลแห่งการบันทึก", "บันทึกการเดินทาง ฟื้นฟู HP/MP และตั้งจุดเริ่มใหม่ที่นี่?", [
         ["บันทึก", () => (commit(setCheckpoint(save, t.id), "บันทึกเกมแล้ว ✓ ฟื้นฟูเต็ม"), close())],
         ["ยกเลิก", close],
       ]);
+    if (t.kind !== "chest") return;
     if (save.progress.claimed.includes(t.id)) return talk("หีบสมบัติ", "หีบว่างเปล่า", [["ปิด", close]]);
     const next = openChest(save, t.id);
     if (!next) return talk("หีบสมบัติ", "กระเป๋าเต็ม ยังเปิดหีบไม่ได้", [["ปิด", close]]);
@@ -306,6 +349,47 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
       },
     ];
     talk(KAEL_WHO, `${note ? `${note} · ` : ""}${lines.join(" · ")} · Gold ${save.gold}`, [...TRADE_ITEMS.map(deal), ["กลับ", () => kaelMenu()]]);
+  }
+
+  // ---------- the player's shop: shelves and counter (rules in shop.ts) ----------
+  function shelfPanel(id: ShelfId, note = "") {
+    const sh = save.shop.shelves[id];
+    const item = sh?.item ?? "wolf_pelt"; // shortcut: Wolf Pelt is the only item with a reference price yet
+    const tier = sh?.tier ?? 100;
+    const name = ITEMS[item].name;
+    const shown = sh ? `${name} ×${sh.qty} · ราคา ${priceOf(item, tier)} G (${tier}%)` : "ชั้นว่าง";
+    const text = `${note ? `${note} · ` : ""}${shown} · ในกระเป๋า ${name} ×${save.items[item]}`;
+    if (save.shop.open) return talk("ชั้นวาง", `ร้านเปิดอยู่ ปิดร้านที่เคาน์เตอร์ก่อนจัดของ · ${shown}`, [["ปิด", close]]);
+    const run = (r: Result, msg: string) => {
+      if (!r.ok) return shelfPanel(id, r.why);
+      commit(r.save, msg);
+      shelfPanel(id, "✓");
+    };
+    const all = Math.min(save.items[item], SHELF_CAP - (sh?.qty ?? 0));
+    const next = PRICE_TIERS[(PRICE_TIERS.indexOf(tier) + 1) % PRICE_TIERS.length];
+    talk("ชั้นวาง", text, [
+      ...(all > 0
+        ? ([
+            ["วาง ×1", () => run(stockShelf(save, id, item, 1, tier), `วาง ${name} ×1`)],
+            [`วางทั้งหมด ×${all}`, () => run(stockShelf(save, id, item, all, tier), `วาง ${name} ×${all}`)],
+          ] as [string, () => void][])
+        : []),
+      ...(sh
+        ? ([
+            [`ราคา ${next}%`, () => run(setTier(save, id, next), `ตั้งราคา ${priceOf(item, next)} G`)],
+            ["เก็บคืน", () => run(unstockShelf(save, id), `เก็บ ${name} คืนกระเป๋า`)],
+          ] as [string, () => void][])
+        : []),
+      ["ปิด", close],
+    ]);
+  }
+  function counterPanel() {
+    const open = save.shop.open;
+    const stocked = SHELF_IDS.filter((id) => save.shop.shelves[id]).length;
+    talk("เคาน์เตอร์", `ร้าน${open ? "เปิด" : "ปิด"}อยู่ · มีของ ${stocked}/4 ชั้น · ขายไปแล้ว ${save.shop.sales} ชิ้น · Gold ${save.gold}`, [
+      [open ? "ปิดร้าน" : "เปิดร้าน", () => (commit(setOpen(save, !open), open ? "ปิดร้านแล้ว" : "เปิดร้านแล้ว ลูกค้ากำลังมา"), close())],
+      ["ปิด", close],
+    ]);
   }
 
   /** Bounded dialog panel; each choice runs once (buttons disable on first press). */
@@ -403,17 +487,20 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   function resize() {
     const r = main.getBoundingClientRect();
     // Whole device pixels per art pixel, capped at 6 so the art stays fine-grained on big screens.
+    // At least 14×10 tiles show, or the whole room when the map is smaller (the shop, §6).
     const dpr = devicePixelRatio || 1;
-    scale = Math.max(1, Math.min(6, Math.floor(Math.min((r.width * dpr) / (14 * TILE), (r.height * dpr) / (10 * TILE))))) / dpr;
+    const cols = Math.min(14, map().rows[0].length);
+    const rows = Math.min(10, map().rows.length);
+    scale = Math.max(1, Math.min(6, Math.floor(Math.min((r.width * dpr) / (cols * TILE), (r.height * dpr) / (rows * TILE))))) / dpr;
     vw = Math.ceil(r.width / scale);
     vh = Math.ceil(r.height / scale);
     crisp(canvas, vw, vh, scale);
   }
   addEventListener("resize", resize, on);
 
-  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement; kael: HTMLCanvasElement }) | null = null;
-  Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), composite(KAEL_LOOK, "ranger"), loadArt()])
-    .then(([hero, elaine, kael, a]) => (sheets = { ...a, hero, elaine, kael }))
+  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement; kael: HTMLCanvasElement; customer: HTMLCanvasElement }) | null = null;
+  Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), composite(KAEL_LOOK, "ranger"), composite(CUSTOMER_LOOK, "ranger"), loadArt()])
+    .then(([hero, elaine, kael, customer, a]) => (sheets = { ...a, hero, elaine, kael, customer }))
     .catch(() => toast("โหลดภาพแผนที่ไม่สำเร็จ"));
 
   function frame(now: number) {
@@ -422,6 +509,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (move && now - move.t0 >= MOVE_MS) arrive();
     if (!move && held && !busy) tryMove(held);
     stepKael(now);
+    stepCustomer(now);
     draw(now);
     requestAnimationFrame(frame);
   }
@@ -487,6 +575,68 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     refreshTarget();
   }
 
+  // ---------- shop customer: one visitor at a time, door → shelf → counter → door (§5) ----------
+  type Visit = { x: number; y: number; from: [number, number]; t0: number; next: number; state: "in" | "look" | "pay" | "out"; shelf: ShelfId; waits: number };
+  let visit: Visit | null = null;
+  let nextVisitAt = 0;
+  const DOOR = SHOP.exits[0];
+  const COUNTER = SHOP.entities.find((e) => e.kind === "counter")!;
+  function stepCustomer(now: number) {
+    if (save.progress.map !== SHOP_MAP) return void (visit = null);
+    if (!visit) {
+      const stocked = SHELF_IDS.filter((id) => save.shop.shelves[id]);
+      if (!save.shop.open || busy || now < nextVisitAt || !stocked.length || (pos.x === DOOR.x && pos.y === DOOR.y)) return;
+      const shelf = stocked[Math.floor(Math.random() * stocked.length)];
+      visit = { x: DOOR.x, y: DOOR.y, from: [DOOR.x, DOOR.y], t0: now, next: now + CUSTOMER_STEP_MS, state: "in", shelf, waits: 0 };
+      main.dataset.customer = "in";
+      return;
+    }
+    const v = visit;
+    if (busy) v.next = Math.max(v.next, now + CUSTOMER_STEP_MS); // the world pauses while a panel is open
+    if (now < v.next) return;
+    const shelfAt = SHOP.entities.find((e) => e.id === v.shelf)!;
+    const goal =
+      v.state === "out" ? (x: number, y: number) => x === DOOR.x && y === DOOR.y
+      : v.state === "pay" ? (x: number, y: number) => x === COUNTER.x && y === COUNTER.y + 1
+      : beside(shelfAt.x, shelfAt.y);
+    if (goal(v.x, v.y)) {
+      if (v.state === "in") {
+        v.state = "look";
+        v.next = now + 900; // looks at the shelf
+      } else if (v.state === "look") {
+        // The one decision of this visit, rolled once. Only one visitor exists, so nothing else is reserved.
+        v.state = browse(save, v.shelf, 0, Math.random() * 100) ? "pay" : "out";
+        v.next = now + CUSTOMER_STEP_MS;
+      } else if (v.state === "pay") {
+        const sh = save.shop.shelves[v.shelf];
+        const r = checkout(save, v.shelf, nextSaleId(save));
+        if (r.ok && sh) commit(r.save, `ขาย ${ITEMS[sh.item].name} ×1 · +${priceOf(sh.item, sh.tier)} G`);
+        v.state = "out";
+        v.next = now + 700;
+      } else {
+        visit = null;
+        nextVisitAt = now + 2500;
+        delete main.dataset.customer;
+        return;
+      }
+      main.dataset.customer = v.state;
+      return;
+    }
+    const blocked: [number, number][] = [[pos.x, pos.y], ...(move ? [[move.fx, move.fy] as [number, number]] : [])];
+    const step = stepToward(SHOP, save, [v.x, v.y], goal, blocked);
+    if (!step) {
+      // Boxed in by the hero: wait a little, then give up and leave (no sale was made).
+      if (++v.waits > 8) v.state = "out";
+      if (v.waits > 16) return void ((visit = null), (nextVisitAt = now + 2500), delete main.dataset.customer);
+      v.next = now + 300;
+      return;
+    }
+    v.from = [v.x, v.y];
+    [v.x, v.y] = step;
+    v.t0 = now;
+    v.next = now + CUSTOMER_STEP_MS;
+  }
+
   function draw(now: number) {
     if (!sheets) return;
     const m = map();
@@ -521,6 +671,11 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     for (const e of liveEntities(m, save, walkers)) {
       if (e.kind === "crystal") tile(tileIndex(tileAt(m, e.x, e.y)?.startsWith("plaza") ? "plaza_crystal" : "crystal"), e.x, e.y);
       if (e.kind === "sign") tile(tileIndex("sign"), e.x, e.y);
+      if (e.kind === "counter") tile(tileIndex("counter"), e.x, e.y);
+      if (e.kind === "shelf") {
+        const qty = save.shop.shelves[e.id]?.qty ?? 0;
+        tile(tileIndex(qty === 0 ? "shelf_empty" : qty <= 2 ? "shelf_low" : "shelf_full"), e.x, e.y);
+      }
       if (e.kind === "chest") {
         const open = save.progress.claimed.includes(e.id);
         tile(tileIndex(forest ? (open ? "forest_chest_open" : "forest_chest") : open ? "chest_open" : "chest"), e.x, e.y);
@@ -543,6 +698,17 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
           y: e.y,
           draw: () => ctx.drawImage(sheets!.wolf, (Math.floor(anim / 420) % 2) * 32, 0, 32, 24, (e.x + 0.5) * TILE - 16 - cx, (e.y + 1) * TILE - 23 - cy, 32, 24),
         });
+    }
+    if (visit && m.id === SHOP_MAP) {
+      const v = visit;
+      const k = Math.min(1, (now - v.t0) / CUSTOMER_STEP_MS);
+      const vx = (v.from[0] + (v.x - v.from[0]) * k + 0.5) * TILE;
+      const vy = (v.from[1] + (v.y - v.from[1]) * k + 1) * TILE;
+      const walking = k < 1 && !busy;
+      sprites.push({
+        y: k < 1 ? Math.max(v.from[1], v.y) : v.y,
+        draw: () => person(sheets!.customer, walking ? "run" : "idle", Math.floor(anim / (walking ? 110 : 160)), vx - cx, vy - cy, walking ? v.x < v.from[0] : hx < vx),
+      });
     }
     sprites.push({
       y: move ? Math.max(pos.y, move.fy) : pos.y,

@@ -11,6 +11,7 @@ import {
 } from "./data";
 import { checkName, effectiveStats } from "./hero";
 import { parseLook, type Look } from "./looks";
+import { freshShop, parseShop, type ShopState } from "./shop";
 import { KAEL_STOCK } from "./trade";
 import {
   CHECKPOINTS,
@@ -28,10 +29,10 @@ import {
 export const SAVE_KEY = "echoes-of-astra-save";
 export const BACKUP_KEY = "echoes-of-astra-save-backup";
 export const SETTINGS_KEY = "echoes-of-astra-settings";
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface SaveData {
-  version: 3;
+  version: 4;
   hero: {
     name: string;
     gender: Gender;
@@ -59,6 +60,8 @@ export interface SaveData {
   };
   /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
   trade: { seq: number; kael: Partial<Record<ItemId, number>> };
+  /** The player's shop: open flag, shelf stock and the sale receipt counter (shop.ts). */
+  shop: ShopState;
   savedAt: number;
 }
 
@@ -92,6 +95,7 @@ export function newSave(
       quest: { state: "AVAILABLE", kills: [] },
     },
     trade: freshTrade(),
+    shop: freshShop(),
     savedAt: Date.now(),
   };
 }
@@ -122,6 +126,7 @@ export function parseSave(raw: string | null): SaveData | null {
   if (!isObj(d)) return null;
   if (d.version === 1) d = migrateV1(d);
   if (isObj(d) && d.version === 2) d = { ...d, version: 3, trade: freshTrade() };
+  if (isObj(d) && d.version === 3) d = { ...d, version: 4, shop: freshShop() };
   if (!isObj(d) || d.version !== SAVE_VERSION) return null;
   const { hero: h, items, progress: p } = d;
   if (!isObj(h) || !isObj(items) || !isObj(p)) return null;
@@ -174,6 +179,8 @@ export function parseSave(raw: string | null): SaveData | null {
     if (!isInt(stock[id] ?? 0, 0, max)) return null;
     kael[id] = (stock[id] as number | undefined) ?? 0;
   }
+  const shop = parseShop(d.shop);
+  if (!shop) return null;
   if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
 
   return {
@@ -202,6 +209,7 @@ export function parseSave(raw: string | null): SaveData | null {
       quest: { state, kills },
     },
     trade: { seq: t.seq, kael },
+    shop,
     savedAt: d.savedAt,
   };
 }

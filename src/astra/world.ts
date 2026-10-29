@@ -12,7 +12,7 @@ export const TILE_NAMES = [
   "grass", "grass_tuft", "flowers", "path", "water", "tree", "bush", "wall", "roof", "door", "fence",
   "rock", "forest", "forest_path", "forest_tree", "crystal", "chest", "chest_open", "sign", "bridge",
   "forest_chest", "forest_chest_open", "cobble", "cobble_worn", "plaza", "lamp", "barrel", "crate", "planter",
-  "plaza_worn", "plaza_crystal",
+  "plaza_worn", "plaza_crystal", "floor", "shop_wall", "shop_door", "shelf_empty", "shelf_low", "shelf_full", "counter",
 ] as const;
 export type TileName = (typeof TILE_NAMES)[number];
 export const tileIndex = (t: TileName) => TILE_NAMES.indexOf(t);
@@ -21,10 +21,10 @@ const LEGEND: Record<string, TileName> = {
   ".": "grass", ",": "grass_tuft", "*": "flowers", "=": "path", "~": "water", T: "tree", b: "bush",
   W: "wall", R: "roof", D: "door", F: "fence", o: "rock", f: "forest", _: "forest_path",
   Y: "forest_tree", B: "bridge", c: "cobble", k: "cobble_worn", p: "plaza", L: "lamp", r: "barrel", x: "crate",
-  P: "planter", q: "plaza_worn",
+  P: "planter", q: "plaza_worn", w: "shop_wall", ":": "floor", d: "shop_door",
 };
 const SOLID = new Set<TileName>([
-  "water", "tree", "bush", "wall", "roof", "door", "fence", "rock", "forest_tree", "lamp", "barrel", "crate", "planter",
+  "water", "tree", "bush", "wall", "roof", "door", "fence", "rock", "forest_tree", "lamp", "barrel", "crate", "planter", "shop_wall",
 ]);
 
 /**
@@ -58,8 +58,11 @@ export const PROP_ART = {
 export type PropArt = keyof typeof PROP_ART;
 export const BUILDING_PX = 80;
 
-export type MapId = "oakheart_village" | "whispering_forest";
-export const MAP_IDS: MapId[] = ["oakheart_village", "whispering_forest"];
+export type MapId = "oakheart_village" | "whispering_forest" | "oakheart_player_shop_interior";
+export const MAP_IDS: MapId[] = ["oakheart_village", "whispering_forest", "oakheart_player_shop_interior"];
+export const SHOP_MAP: MapId = "oakheart_player_shop_interior";
+export const SHELF_IDS = ["shelf_a", "shelf_b", "shelf_c", "shelf_d"] as const;
+export type ShelfId = (typeof SHELF_IDS)[number];
 export type Dir = "up" | "down" | "left" | "right";
 export const STEP: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 
@@ -70,7 +73,11 @@ export type Entity =
   | { kind: "crystal"; id: CheckpointId; x: number; y: number }
   | { kind: "chest"; id: string; x: number; y: number; item: ItemId; count: number }
   | { kind: "sign"; id: string; x: number; y: number; text: string }
-  | { kind: "enemy"; id: string; x: number; y: number; enemy: EnemyId };
+  | { kind: "enemy"; id: string; x: number; y: number; enemy: EnemyId }
+  /** A building door: Interact walks through it to `to` at the arrival anchor. */
+  | { kind: "door"; id: string; x: number; y: number; to: MapId; ax: number; ay: number }
+  | { kind: "shelf"; id: ShelfId; x: number; y: number }
+  | { kind: "counter"; id: "shop_counter"; x: number; y: number };
 
 export interface WorldMap {
   id: MapId;
@@ -147,6 +154,8 @@ export const MAPS: Record<MapId, WorldMap> = {
       { kind: "crystal", id: "oakheart_square", x: 16, y: 16 },
       { kind: "chest", id: "oakheart_chest", x: 37, y: 26, item: "potion", count: 1 },
       { kind: "sign", id: "oakheart_sign", x: 37, y: 13, text: "→ Whispering Forest" },
+      // The General Store's front door (its sprite's door column) leads into the player's shop.
+      { kind: "door", id: "player_shop_door", x: 10, y: 12, to: "oakheart_player_shop_interior", ax: 2, ay: 6 },
     ],
     exits: [{ x: 39, y: 14, to: "whispering_forest", ax: 1, ay: 8 }],
   },
@@ -180,6 +189,20 @@ export const MAPS: Record<MapId, WorldMap> = {
       { kind: "sign", id: "shrine_sign", x: 16, y: 1, text: "Ancient Shrine · ทางถูกหินปิดไว้ (มาในขั้นถัดไป)" },
     ],
     exits: [{ x: 0, y: 8, to: "oakheart_village", ax: 38, ay: 14 }],
+  },
+  // SHOP_TOPDOWN_SCENE §2 sample room: four shelves, one counter, the door at (1,7), hero spawn (2,6).
+  oakheart_player_shop_interior: {
+    id: "oakheart_player_shop_interior",
+    name: "ร้านของคุณ",
+    rows: ["wwwwwwwwww", "w::::::::w", "w::::::::w", "w::::::::w", "w::::::::w", "w::::::::w", "w::::::::w", "wd:::::::w"],
+    entities: [
+      { kind: "shelf", id: "shelf_a", x: 3, y: 1 },
+      { kind: "shelf", id: "shelf_b", x: 6, y: 1 },
+      { kind: "shelf", id: "shelf_c", x: 3, y: 3 },
+      { kind: "shelf", id: "shelf_d", x: 6, y: 3 },
+      { kind: "counter", id: "shop_counter", x: 5, y: 5 },
+    ],
+    exits: [{ x: 1, y: 7, to: "oakheart_village", ax: 10, ay: 13 }],
   },
 };
 

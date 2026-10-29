@@ -112,7 +112,7 @@ describe("chests and saves", () => {
       savedAt: 1,
     };
     const s = parseSave(JSON.stringify(v1))!;
-    expect(s.version).toBe(3);
+    expect(s.version).toBe(4);
     expect(s.progress).toMatchObject({ map: "oakheart_village", x: 16, y: 17, quest: { state: "AVAILABLE", kills: [] } });
   });
   const bad = (f: (s: SaveData) => unknown) => JSON.stringify(f(fresh()));

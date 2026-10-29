@@ -247,6 +247,59 @@ test("Kael walks the plaza, stops to trade, and trades survive a reload", async 
   expect([s.gold, s.items.wolf_pelt, s.trade.kael.wolf_pelt, s.trade.seq]).toEqual([88, 2, 2, 2]);
 });
 
+test("the player's shop: stock a shelf, open, a customer buys at the counter, leaving closes it", async ({ page }) => {
+  await newHero(page);
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("echoes-of-astra-save")!);
+    const wolves = ["forest_wolf_1", "forest_wolf_2", "forest_wolf_3"];
+    s.progress = { ...s.progress, defeated: wolves, quest: { state: "COMPLETED", kills: wolves }, claimed: ["forest_troubles:turnin"], x: 10, y: 13, facing: "up" };
+    s.items.wolf_pelt = 2;
+    localStorage.setItem("echoes-of-astra-save", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".act")).toHaveText("เข้าร้าน");
+  await page.keyboard.press("e");
+  await expect(world(page)).toHaveAttribute("data-map", "oakheart_player_shop_interior");
+  await expectNoScroll(page);
+
+  const shop = MAPS.oakheart_player_shop_interior;
+  const shelf = shop.entities.find((e) => e.id === "shelf_a")!;
+  await goTo(page, (x, y) => x === shelf.x - 1 && y === shelf.y);
+  await page.keyboard.press("ArrowRight"); // face the shelf
+  await page.keyboard.press("e");
+  await page.getByRole("button", { name: "วางทั้งหมด ×2" }).click();
+  await page.getByRole("button", { name: "ราคา 120%" }).click();
+  await page.getByRole("button", { name: "ราคา 150%" }).click();
+  await page.getByRole("button", { name: "ราคา 80%" }).click(); // 19 G, 85% chance
+  await expect(page.getByRole("dialog")).toContainText("Wolf Pelt ×2 · ราคา 19 G (80%)");
+  await expectNoScroll(page);
+  await page.getByRole("button", { name: "ปิด", exact: true }).click();
+  let s = await saved(page);
+  expect([s.items.wolf_pelt, s.shop.shelves.shelf_a]).toEqual([0, { item: "wolf_pelt", qty: 2, tier: 80 }]);
+
+  const counter = shop.entities.find((e) => e.kind === "counter")!;
+  await goTo(page, (x, y) => x === counter.x - 1 && y === counter.y);
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("e");
+  await page.getByRole("button", { name: "เปิดร้าน" }).click();
+  await expect(world(page)).toHaveAttribute("data-shop", "open");
+  // One visit: the customer walks in, browses, maybe pays at the counter, and walks out.
+  await expect(world(page)).toHaveAttribute("data-customer", /.+/, { timeout: 10_000 });
+  await expect(world(page)).not.toHaveAttribute("data-customer", /.+/, { timeout: 30_000 });
+  s = await saved(page);
+  expect(s.shop.sales).toBeLessThanOrEqual(1);
+  expect(s.gold).toBe(19 * s.shop.sales); // only a checkout pays, once per receipt
+  expect(s.shop.shelves.shelf_a.qty).toBe(2 - s.shop.sales);
+
+  await goTo(page, (x, y) => x === shop.exits[0].x && y === shop.exits[0].y);
+  await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
+  await expect(world(page)).toHaveAttribute("data-shop", "closed"); // no clerk, so leaving closes it
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  expect((await saved(page)).shop.shelves.shelf_a.qty).toBe(2 - s.shop.sales);
+});
+
 test("crystal saves and the chest opens once", async ({ page }) => {
   await newHero(page);
   await page.keyboard.press("ArrowUp"); // the crystal blocks the step; the hero turns to it
