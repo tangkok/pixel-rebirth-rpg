@@ -56,6 +56,7 @@ export interface BattleState {
   enemy: EnemyId;
   classId: ClassId;
   talentId: string;
+  level: number;
   hero: Fighter & { astra: number; revived: boolean };
   foe: Fighter & {
     actions: number;
@@ -100,7 +101,7 @@ export type BattleEvent =
   | { type: "intent"; intent: IntentId }
   | { type: "end"; result: "win" | "lose" };
 
-export const heroStats = (b: Pick<BattleState, "classId" | "talentId">): Stats => effectiveStats(b.classId, b.talentId);
+export const heroStats = (b: Pick<BattleState, "classId" | "talentId" | "level">): Stats => effectiveStats(b.classId, b.talentId, b.level);
 export const foeStats = (b: Pick<BattleState, "enemy">): Stats => ENEMIES[b.enemy].stats;
 const has = (b: Pick<BattleState, "talentId">, id: string) => b.talentId === id;
 const isBoss = (b: BattleState) => "boss" in ENEMIES[b.enemy];
@@ -123,7 +124,7 @@ const order = (b: BattleState): Slot[] =>
   b.round === 1 ? (has(b, "time_weaver") ? ["hero", "bonus", "foe"] : ["hero", "foe"]) : heroStats(b).spd >= foeStats(b).spd ? ["hero", "foe"] : ["foe", "hero"];
 
 export function startBattle(
-  hero: { classId: ClassId; talentId: string; hp: number; mp: number },
+  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number },
   items: Record<ItemId, number>,
   encounterId: string,
   enemy: EnemyId,
@@ -134,6 +135,7 @@ export function startBattle(
     enemy,
     classId: hero.classId,
     talentId: hero.talentId,
+    level: hero.level ?? 1,
     hero: { hp: hero.hp, mp: hero.mp, defending: false, astra: 0, revived: false },
     foe: { hp: max, mp: 0, defending: false, actions: 0, aura: null, auraAge: 0, shock: 0, weak: false, frozen: false, freezeImmune: 0 },
     items: { ...items },

@@ -94,6 +94,15 @@ export const CLASSES: Record<ClassId, ClassDef> = {
 };
 export const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
 
+/** PLACEHOLDER: flat base-stat gain per level above 1 (GDD has levels 1–3 but no growth table). */
+export const GROWTH: Record<ClassId, Stats> = {
+  knight: { maxHp: 16, maxMp: 3, atk: 2, def: 2, mag: 0, res: 1, spd: 1 },
+  ranger: { maxHp: 11, maxMp: 4, atk: 2, def: 1, mag: 0, res: 1, spd: 2 },
+  sorcerer: { maxHp: 8, maxMp: 10, atk: 0, def: 0, mag: 2, res: 1, spd: 1 },
+  cleric: { maxHp: 10, maxMp: 8, atk: 1, def: 1, mag: 2, res: 2, spd: 1 },
+  berserk: { maxHp: 18, maxMp: 2, atk: 3, def: 0, mag: 0, res: 0, spd: 1 },
+};
+
 // Per-draw odds in thousandths so the boundaries are exact integers.
 export const RARITY_ODDS: { rarity: Rarity; thai: string; per1000: number }[] = [
   { rarity: "common", thai: "ทั่วไป", per1000: 600 },

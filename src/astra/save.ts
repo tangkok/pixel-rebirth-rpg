@@ -135,8 +135,7 @@ export function parseSave(raw: string | null): SaveData | null {
   const look = parseLook(h.look, h.gender as Gender);
   if (!look) return null;
   if (!isInt(h.level, 1, MAX_LEVEL) || !isInt(h.exp, 0, 1e7)) return null;
-  const max = effectiveStats(h.classId as ClassId, h.talentId);
-  // Level-up growth is not designed yet, so caps use the level 1 maximum.
+  const max = effectiveStats(h.classId as ClassId, h.talentId, h.level);
   if (!isInt(h.hp, 0, max.maxHp) || !isInt(h.mp, 0, max.maxMp)) return null;
 
   const itemIds = Object.keys(ITEMS) as ItemId[];

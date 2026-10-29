@@ -224,7 +224,7 @@ describe("elemental reactions (§6)", () => {
     expect(hits(run(b, item("storm_vial")).events, "hero")[0].reaction).toBeUndefined();
   });
   it("a boss is immune to a second Freeze for two of its own actions", () => {
-    const s = heroStats({ classId: "ranger", talentId: "tough_skin" });
+    const s = heroStats({ classId: "ranger", talentId: "tough_skin", level: 1 });
     let b = startBattle({ classId: "ranger", talentId: "tough_skin", hp: s.maxHp, mp: s.maxMp }, { potion: 0, water_flask: 9, frost_shard: 9, storm_vial: 0, wolf_pelt: 0 }, "boss", "ancient_guardian");
     b = run(b, item("water_flask")).state;
     b = run(b, item("frost_shard")).state;

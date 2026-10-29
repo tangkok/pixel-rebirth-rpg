@@ -1,6 +1,6 @@
 // Top-down exploration screen. Draws the map and forwards input; every game rule lives in
 // world.ts and every committed change goes through commit() so it is saved atomically.
-import { ENEMIES, ITEMS, type ItemId } from "./data";
+import { ENEMIES, ITEMS, LEVEL_EXP, STAT_IDS, STAT_LABEL, type ItemId } from "./data";
 import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
@@ -44,7 +44,12 @@ const ELAINE: Look = { skin: 2, face: 3, hair: "f4", hairColor: 6, outfit: 11, o
 const KAEL_LOOK: Look = { skin: 1, face: 2, hair: "m6", hairColor: 3, outfit: 4, outfitColor: 5 };
 const KAEL_STEP_MS = 420;
 const KAEL_PAUSE_MS = 1400; // stops at each corner of his loop to look around
-const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId);
+/** "MaxHP +16 · ATK +2 …" for the stats that rose between two saves. */
+const levelGains = (a: SaveData, b: SaveData) => {
+  const [x, y] = [heroStatsOf(a), heroStatsOf(b)];
+  return STAT_IDS.filter((k) => y[k] > x[k]).map((k) => `${STAT_LABEL[k]} +${y[k] - x[k]}`).join(" · ");
+};
+const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId, s.hero.level);
 const HERO_FOOT = { x: 41, y: 34 }; // feet of the Heroes99 body inside its 100x40 frame
 
 const img = (src: string) =>
@@ -176,7 +181,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   );
 
   function hud() {
-    const s = effectiveStats(save.hero.classId, save.hero.talentId);
+    const s = heroStatsOf(save);
     status.textContent = `${save.hero.name} Lv.${save.hero.level} · HP ${save.hero.hp}/${s.maxHp} · MP ${save.hero.mp}/${s.maxMp} · ${save.gold} G`;
     quest.textContent = `${map().name} · ${questLine(save)}`;
     main.setAttribute("aria-label", map().name);
@@ -189,7 +194,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     toastEl.textContent = msg;
     toastEl.classList.toggle("on", !!msg);
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => toastEl.classList.remove("on"), 2600);
+    toastTimer = window.setTimeout(() => toastEl.classList.remove("on"), Math.max(2600, msg.length * 60)); // long level-up lines need time to read
   }
 
   // ---------- movement ----------
@@ -338,7 +343,10 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   function menu() {
     if (busy) return;
     const bag = (Object.keys(ITEMS) as ItemId[]).filter((k) => save.items[k]).map((k) => `${ITEMS[k].name} ×${save.items[k]}`);
-    talk("เมนู", `${questLine(save)} · ${save.gold} Gold · ${bag.join(" · ") || "ไม่มีไอเทม"}`, [
+    const st = heroStatsOf(save);
+    const need = LEVEL_EXP[save.hero.level];
+    const lv = `Lv.${save.hero.level} · EXP ${save.hero.exp}${need === undefined ? " (สูงสุด)" : `/${need}`} · ${STAT_IDS.map((k) => `${STAT_LABEL[k]} ${st[k]}`).join(" ")}`;
+    talk("เมนู", `${lv} · ${questLine(save)} · ${save.gold} Gold · ${bag.join(" · ") || "ไม่มีไอเทม"}`, [
       ["กลับเกม", close],
       ["กลับหน้าแรก", () => {
         commit(save, "บันทึกตำแหน่งแล้ว");
@@ -362,7 +370,8 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
         const ok = writeSave(store, next);
         const loot = lootOf(e.enemy, e.id);
         const got = loot ? ` · +${loot.gold} Gold · ${ITEMS[loot.item].name} ×1` : "";
-        return explore(next, toTitle, `ชนะ ${ENEMIES[e.enemy].name} · +${ENEMIES[e.enemy].exp} EXP${got}${ok ? "" : " · บันทึกไม่ได้"}`);
+        const up = next.hero.level > here.hero.level ? ` · เลเวลอัป! Lv.${next.hero.level} (${levelGains(here, next)})` : "";
+        return explore(next, toTitle, `ชนะ ${ENEMIES[e.enemy].name} · +${next.hero.exp - here.hero.exp} EXP${got}${up}${ok ? "" : " · บันทึกไม่ได้"}`);
       }
       // Loss: back to the last checkpoint at full strength; the pre-battle save is otherwise kept.
       const c = CHECKPOINTS[here.progress.checkpoint];

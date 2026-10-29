@@ -1,5 +1,6 @@
 import {
   CLASSES,
+  GROWTH,
   RARITY_ODDS,
   STAT_IDS,
   STAT_LABEL,
@@ -53,14 +54,15 @@ export function rollTalent(rng: () => number = Math.random): TalentDef {
   return tier[Math.min(tier.length - 1, Math.floor(rng() * tier.length))];
 }
 
-/** COMBAT_SPEC §1: effective = max(1, floor(base * (1 + sum(percentMods)))). */
-export function effectiveStats(classId: ClassId, talentId?: string): Stats {
+/** COMBAT_SPEC §1: effective = max(1, floor(base * (1 + sum(percentMods)))); base grows per level. */
+export function effectiveStats(classId: ClassId, talentId?: string, level = 1): Stats {
   const base = CLASSES[classId].base;
+  const grow = GROWTH[classId];
   const mods = talentId ? (talentById(talentId)?.stats ?? {}) : {};
   const out = {} as Stats;
   for (const s of STAT_IDS) {
     // Integer percent math avoids 18 * 1.08 float drift.
-    out[s] = Math.max(1, Math.floor((base[s] * (100 + (mods[s] ?? 0))) / 100));
+    out[s] = Math.max(1, Math.floor(((base[s] + grow[s] * (level - 1)) * (100 + (mods[s] ?? 0))) / 100));
   }
   return out;
 }

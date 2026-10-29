@@ -296,7 +296,14 @@ export function recordVictory(s: SaveData, encounterId: string): SaveData {
   const n = clone(s);
   n.progress.defeated.push(encounterId);
   n.hero.exp = Math.min(n.hero.exp + expFor(e.enemy, n.hero.talentId), 1e7);
+  const was = n.hero.level;
   n.hero.level = levelFor(n.hero.exp);
+  if (n.hero.level > was) {
+    // PLACEHOLDER: a level-up fully restores HP/MP (no rule in the GDD yet).
+    const max = effectiveStats(n.hero.classId, n.hero.talentId, n.hero.level);
+    n.hero.hp = max.maxHp;
+    n.hero.mp = max.maxMp;
+  }
   const loot = lootOf(e.enemy, encounterId);
   if (loot) {
     n.gold = Math.min(n.gold + loot.gold, GOLD_CAP);
@@ -337,7 +344,7 @@ export function openChest(s: SaveData, chestId: string): SaveData | null {
 /** Save crystals set the respawn point and fully restore HP/MP (PLACEHOLDER: GDD has no rest rule yet). */
 export function setCheckpoint(s: SaveData, id: CheckpointId): SaveData {
   const n = clone(s);
-  const max = effectiveStats(n.hero.classId, n.hero.talentId);
+  const max = effectiveStats(n.hero.classId, n.hero.talentId, n.hero.level);
   n.progress.checkpoint = id;
   n.hero.hp = max.maxHp;
   n.hero.mp = max.maxMp;

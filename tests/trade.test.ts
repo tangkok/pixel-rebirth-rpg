@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { GROWTH } from "../src/astra/data";
+import { heroStats } from "../src/astra/battle";
+import { effectiveStats } from "../src/astra/hero";
 import { defaultLook } from "../src/astra/looks";
 import { newSave, parseSave, type SaveData } from "../src/astra/save";
 import { KAEL_STOCK, merchantBuy, merchantSell, nextTradeId } from "../src/astra/trade";
@@ -102,5 +105,29 @@ describe("removed player shop", () => {
     expect(back.version).toBe(3);
     expect(back.items.wolf_pelt).toBe(4);
     expect(back).not.toHaveProperty("shop");
+  });
+});
+
+describe("level-up growth", () => {
+  const atWolves = (s: SaveData, exp: number): SaveData => ({ ...s, hero: { ...s.hero, exp, hp: 1, mp: 0 }, progress: { ...s.progress, map: "whispering_forest", x: 1, y: 8 } });
+  it("grows stats per level from the class table, after talent percents", () => {
+    const l1 = effectiveStats("knight", "tough_skin");
+    const l3 = effectiveStats("knight", "tough_skin", 3);
+    expect(l3.atk - l1.atk).toBe(GROWTH.knight.atk * 2);
+    expect(l3.maxHp).toBeGreaterThan(l1.maxHp);
+  });
+  it("a victory that crosses a threshold raises the level and fully restores HP/MP", () => {
+    const won = recordVictory(atWolves(fresh(), 25), "forest_wolf_1");
+    expect(won.hero.level).toBe(2);
+    const max = effectiveStats("knight", "tough_skin", 2);
+    expect([won.hero.hp, won.hero.mp]).toEqual([max.maxHp, max.maxMp]);
+    expect(parseSave(JSON.stringify(won))?.hero.hp).toBe(max.maxHp); // level-2 HP passes the save check
+  });
+  it("a victory without a level-up keeps the battle's HP", () => {
+    const won = recordVictory(atWolves(fresh(), 0), "forest_wolf_1");
+    expect([won.hero.level, won.hero.hp]).toEqual([1, 1]);
+  });
+  it("battles use the hero's level", () => {
+    expect(heroStats({ classId: "berserk", talentId: "tough_skin", level: 2 }).atk).toBe(effectiveStats("berserk", "tough_skin", 2).atk);
   });
 });
