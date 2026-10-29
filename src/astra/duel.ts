@@ -114,7 +114,7 @@ export function duel(
         { class: "hint" },
         settings.autoTiming || still()
           ? "Auto Timing: ทุกจังหวะนับเป็น Normal (เปลี่ยนได้ใน Settings)"
-          : "แตะจอหรือกด Space ตอนวงแหวนหดตรงกัน · โจมตี Perfect ×1.2 · Astra เต็ม 100 ใช้ Burst",
+          : "แตะจอหรือกด Space ตอนวงแหวนหดตรงกัน · โจมตี Perfect ×1.2 · ป้องกัน Perfect ไม่เสีย HP · Astra เต็ม 100 ใช้ Burst",
       ),
       cmds,
     ),
@@ -379,20 +379,20 @@ export function duel(
 
   // ---------- timing cue → commit → play back ----------
   let cueing = false;
-  /** One Perfect Strike result: tap or Space when the ring meets its target. */
-  function cue(): Promise<Timing> {
+  /** One Perfect Strike/Guard result: tap or Space when the ring meets its target. */
+  function cue(kind: "strike" | "guard"): Promise<Timing> {
     if (settings.autoTiming || still()) return Promise.resolve("normal");
     cueing = true;
     render();
     const el = h(
       "div",
-      { class: "cue strike", aria: { hidden: "true" } },
+      { class: `cue ${kind}`, aria: { hidden: "true" } },
       h("i", { class: "ring" }),
-      h("b", {}, "โจมตี!"),
+      h("b", {}, kind === "strike" ? "โจมตี!" : "ป้องกัน!"),
     );
     el.style.setProperty("--lead", `${LEAD_MS}ms`);
     frame.append(el);
-    log.textContent = "แตะจอหรือกด Space ตอนวงแหวนตรงกัน!";
+    log.textContent = kind === "strike" ? "แตะจอหรือกด Space ตอนวงแหวนตรงกัน!" : `${foe.name} กำลังจะ ${INTENTS[b.intent].name}! แตะเพื่อป้องกัน`;
     const target = performance.now() + LEAD_MS;
     return new Promise((resolve) => {
       const end = (t: Timing) => {
@@ -423,15 +423,14 @@ export function duel(
   async function commit(c: Command) {
     if (playing || illegal(b, c)) return;
     playing = true;
-    const timing = c.type === "attack" || c.type === "skill" ? await cue() : "normal";
+    const timing = c.type === "attack" || c.type === "skill" ? await cue("strike") : "normal";
     let r = act(b, `a${++seq}`, c, timing);
     while (r.events.length && main.isConnected) {
       const before = b;
       b = r.state;
       await play(before, r.events);
       if (b.over || b.queue[0] !== "foe") break;
-      // Owner's rule: the enemy's turn asks for no input at all, so every guard is Normal.
-      r = guard(b, `a${++seq}`, "normal");
+      r = guard(b, `a${++seq}`, await cue("guard"));
     }
     playing = false;
     render();

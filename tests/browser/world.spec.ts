@@ -318,9 +318,9 @@ test("a well-timed tap scores Perfect/Good and fills Astra; a missed cue counts 
   );
   await page.getByRole("button", { name: "Attack โจมตี" }).click();
   await timed;
-  await expect(page.locator(".cue")).toHaveCount(0); // the wolf's turn asks for nothing
+  await expect(page.locator(".cue.guard")).toBeVisible(); // wolf's turn: guard cue, left to time out
   await expect(page.locator(".cmds button:not(:disabled)").first()).toBeVisible({ timeout: 10_000 });
-  // Strike Perfect (+15) or Good (+10), then the faster wolf acts twice, each guard Normal (+3) with no input.
+  // Strike Perfect (+15) or Good (+10), then the faster wolf acts twice, each untimed guard Normal (+3).
   await expect(page.locator(".fe-astra")).toHaveAttribute("aria-valuetext", /^(21|16)\/100$/);
 });
 
