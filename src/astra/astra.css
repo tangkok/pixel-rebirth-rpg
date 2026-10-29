@@ -749,7 +749,6 @@ footer.row {
   pointer-events: none;
 }
 .cue.strike { left: 74%; }
-.cue.guard { left: 26%; border-color: #8fd3ff; }
 .cue .ring {
   position: absolute;
   inset: -3px;
