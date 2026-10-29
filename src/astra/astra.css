@@ -165,7 +165,8 @@ p {
 
 /* ---------- creation: portrait = stacked, landscape = sprite beside panel ---------- */
 .create {
-  grid-template: "steps" auto "sprite" minmax(48px, 26%) "panel" 1fr "foot" auto / 1fr;
+  /* The hero preview takes whatever the step's panel leaves, so the screen is always full. */
+  grid-template: "steps" auto "sprite" minmax(64px, 1fr) "panel" auto "foot" auto / minmax(0, 1fr);
 }
 @media (orientation: landscape) {
   .create {
@@ -326,7 +327,7 @@ footer.row {
 }
 .looks {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10em, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.3em 0.6em;
 }
 .cycle {
@@ -355,6 +356,10 @@ footer.row {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.draw .btn {
+  flex: none;
+  white-space: nowrap;
 }
 .draw {
   flex-wrap: nowrap;
@@ -599,7 +604,7 @@ footer.row {
 /* ---------- duel ---------- */
 /* ---------- duel: GBA-style frame (original art; framing inspired by handheld FE) ---------- */
 .fe {
-  grid-template: "stage" minmax(0, 1fr) "panel" auto / minmax(0, 1fr);
+  grid-template: "stage" auto "panel" minmax(0, 1fr) / minmax(0, 1fr);
 }
 @media (orientation: landscape) {
   .fe {
@@ -832,5 +837,88 @@ footer.row {
   .act {
     min-width: 64px;
     min-height: 64px;
+  }
+}
+
+/* ---------- UI skin: Dark Ages UI by Hypnobius (cut pieces in ui/, scripts/import-ui.py) ----------
+   9-slice border images at whole-pixel scales: buttons 2×, frames 1×. */
+.btn,
+.panel,
+.dialog,
+.talk,
+.hud > div,
+.sprite-box,
+.toast {
+  image-rendering: pixelated;
+  border-style: solid;
+  border-radius: 0;
+  background: none;
+}
+.btn {
+  border-width: 10px 24px;
+  border-image: url("./ui/btn.png") 5 12 fill / 10px 24px;
+  padding: 0 0.2em;
+  text-shadow: 0 1px 0 #000;
+}
+.btn[aria-pressed="true"] {
+  border-image-source: url("./ui/btn-on.png");
+  box-shadow: none;
+  background: none;
+  color: var(--gold);
+}
+.btn.primary {
+  border-image-source: url("./ui/btn-primary.png");
+  background: none;
+  color: #fff8e0;
+}
+.cycle .btn,
+.pad .btn,
+.menu-btn,
+.act {
+  border-width: 16px;
+  border-image: url("./ui/slot.png") 8 fill / 16px;
+  padding: 0;
+}
+.act {
+  border-image-source: url("./ui/slot-on.png");
+  border-radius: 0;
+  color: var(--gold);
+}
+.pad .btn {
+  background: none;
+  opacity: 0.92;
+}
+.dialog,
+.talk,
+.panel {
+  border-width: 24px;
+  border-image: url("./ui/frame.png") 24 fill / 24px;
+  padding: 0.1em 0.2em;
+}
+.hud > div,
+.sprite-box,
+.toast {
+  border-width: 12px;
+  border-image: url("./ui/panel.png") 12 fill / 12px;
+  padding: 0 0.2em;
+}
+.sprite-box {
+  /* sky and ground show through the frame's middle */
+  border-image: url("./ui/panel.png") 12 / 12px;
+  background: linear-gradient(#22406b, #142742 60%, #1f3a24 60%, #142a1a) padding-box;
+}
+.toast {
+  border-radius: 0;
+}
+@media (max-height: 420px) {
+  .dialog,
+  .talk,
+  .panel {
+    border-width: 12px;
+    border-image-width: 12px;
+  }
+  .btn {
+    border-width: 8px 18px;
+    border-image-width: 8px 18px;
   }
 }

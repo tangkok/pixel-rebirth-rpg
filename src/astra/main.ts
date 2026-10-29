@@ -33,8 +33,6 @@ import {
   FACES,
   HAIR_COLORS,
   HAIR_STYLES,
-  OUTFIT_COLORS,
-  OUTFITS,
   SKINS,
   type Look,
 } from "./looks";
@@ -292,10 +290,8 @@ function creation() {
           cycle("ใบหน้า", "face", FACES),
           cycle("ทรงผม", "hair", HAIR_STYLES[d.gender]),
           cycle("สีผม", "hairColor", HAIR_COLORS),
-          cycle("ชุด", "outfit", OUTFITS),
-          cycle("สีชุด", "outfitColor", OUTFIT_COLORS),
         ),
-        h("p", { class: "hint" }, `อาวุธ: ${CLASSES[d.classId!].weapon.thai} (ตามอาชีพ ${CLASSES[d.classId!].name})`),
+        h("p", { class: "hint" }, `ชุดเริ่มต้นและอาวุธ (${CLASSES[d.classId!].weapon.thai}) มาตามอาชีพ ${CLASSES[d.classId!].name}`),
       ];
     }
     if (d.step === 3) {

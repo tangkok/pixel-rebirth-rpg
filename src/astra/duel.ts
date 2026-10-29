@@ -307,7 +307,9 @@ export function duel(
   // Scale the 240-wide frame to the space available: integer when it can, smooth otherwise.
   const fit = () => {
     const info = frame.querySelector<HTMLElement>(".fe-info")!.offsetHeight;
-    const k0 = Math.min(wrap.clientWidth / W, (wrap.clientHeight - info) / H);
+    // Portrait: the stage sizes itself (at most 60% of the screen) and the panel takes the rest.
+    const tall = matchMedia("(orientation: portrait)").matches ? main.clientHeight * 0.6 : wrap.clientHeight;
+    const k0 = Math.min(wrap.clientWidth / W, (tall - info) / H);
     crisp(canvas, W, H, k0 >= 2 ? Math.floor(k0) : Math.max(0.5, k0));
     frame.style.width = canvas.style.width;
   };
