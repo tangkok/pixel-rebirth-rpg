@@ -1,0 +1,164 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const SIZES = [
+  { name: "phone portrait", width: 375, height: 667 },
+  { name: "phone landscape", width: 667, height: 375 },
+  { name: "tiny landscape", width: 568, height: 320 },
+  { name: "desktop", width: 1440, height: 900 },
+];
+
+async function expectNoScroll(page: Page) {
+  const m = await page.evaluate(() => {
+    const d = document.documentElement;
+    const offscreen = [...document.querySelectorAll<HTMLElement>("button")]
+      .filter((el) => el.offsetParent !== null)
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5;
+      })
+      .map((el) => el.textContent);
+    return { sw: d.scrollWidth, cw: d.clientWidth, sh: d.scrollHeight, ch: d.clientHeight, offscreen };
+  });
+  expect(m.sw).toBeLessThanOrEqual(m.cw);
+  expect(m.sh).toBeLessThanOrEqual(m.ch);
+  expect(m.offscreen).toEqual([]);
+}
+
+async function newHero(page: Page) {
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.locator("#hero-name").fill("Tang");
+  const next = page.getByRole("button", { name: "ถัดไป", exact: true });
+  await next.click();
+  await page.getByRole("button", { name: "Cleric" }).click();
+  await next.click();
+  await next.click();
+  await page.locator(".draw .btn").click();
+  await expect(page.locator(".slot.landed")).toHaveCount(1);
+  await next.click();
+  await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+}
+
+const world = (page: Page) => page.locator("main.world");
+const KEY = { L: "ArrowLeft", R: "ArrowRight", U: "ArrowUp", D: "ArrowDown" } as const;
+
+/** Walks one tile per letter, waiting for each step to land. */
+async function walk(page: Page, path: string) {
+  for (const c of path) {
+    const before = await world(page).getAttribute("data-pos");
+    await page.keyboard.press(KEY[c as keyof typeof KEY]);
+    await expect(world(page)).not.toHaveAttribute("data-pos", before!);
+  }
+}
+/** Steps into an enemy and wins the placeholder fight. */
+async function fight(page: Page, key: keyof typeof KEY) {
+  await page.keyboard.press(KEY[key]);
+  await expect(page.locator(".encounter")).toBeVisible();
+  const win = page.getByRole("button", { name: "ชนะ (ทดสอบ)" });
+  await win.dblclick(); // a double tap must still count once
+  await expect(world(page)).toBeVisible();
+}
+const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!));
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/astra/");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+});
+
+test("full forest_troubles loop survives reloads without duplicate credit", async ({ page }) => {
+  test.setTimeout(120_000);
+  await newHero(page);
+  await walk(page, "LUU");
+  await page.keyboard.press("e");
+  await expect(page.getByRole("dialog")).toContainText("Forest Wolf สามตัว");
+  await page.getByRole("button", { name: "รับภารกิจ" }).dblclick();
+  await expect(world(page)).toHaveAttribute("data-quest", "ACTIVE");
+
+  await walk(page, "DDD" + "R".repeat(10));
+  await expect(world(page)).toHaveAttribute("data-map", "whispering_forest");
+  await expect(world(page)).toHaveAttribute("data-pos", "1,8");
+  await walk(page, "R".repeat(7));
+  await fight(page, "U");
+  await expect(world(page)).toHaveAttribute("data-pos", "8,8");
+  await expect(page.locator(".hud-quest")).toContainText("1/3");
+
+  // Reload mid-quest: the wolf stays gone and still counts once.
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(world(page)).toHaveAttribute("data-pos", "8,8");
+  await walk(page, "U"); // the beaten wolf's tile is now open
+  await walk(page, "D" + "R".repeat(9) + "D" + "R".repeat(6));
+  await fight(page, "R");
+  await walk(page, "DD" + "L".repeat(7));
+  await fight(page, "L");
+  await expect(world(page)).toHaveAttribute("data-quest", "READY_TO_TURN_IN");
+  expect((await saved(page)).progress.quest.kills).toHaveLength(3);
+
+  await walk(page, "L".repeat(15) + "UUU" + "L");
+  await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
+  await walk(page, "L".repeat(9) + "UUU");
+  await page.keyboard.press("e");
+  await page.getByRole("button", { name: /รับรางวัล/ }).dblclick();
+  await expect(world(page)).toHaveAttribute("data-quest", "COMPLETED");
+  await expect(page.locator(".hud-stats")).toContainText("100 G");
+  const done = await saved(page);
+  expect(done.gold).toBe(100);
+  expect(done.items.potion).toBe(5); // 3 starting + 2 reward
+  expect(done.hero.level).toBe(2); // 60 EXP (PLACEHOLDER curve 0/30/80)
+
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.keyboard.press("e");
+  await expect(page.getByRole("dialog")).toContainText("ขอบคุณอีกครั้ง");
+  await page.getByRole("button", { name: "ปิด" }).click();
+  expect((await saved(page)).gold).toBe(100);
+});
+
+test("crystal saves and the chest opens once", async ({ page }) => {
+  await newHero(page);
+  await page.keyboard.press("ArrowUp"); // the crystal blocks the step; the hero turns to it
+  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+  await expect(page.locator(".act")).toHaveText("บันทึก");
+  await page.locator(".act").click();
+  await page.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(page.locator(".toast")).toContainText("บันทึกเกมแล้ว");
+
+  await walk(page, "D" + "L".repeat(11) + "DD");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator(".act")).toHaveText("เปิดหีบ");
+  await page.keyboard.press("e");
+  await expect(page.locator(".toast")).toContainText("Potion ×1");
+  await page.keyboard.press("e");
+  await expect(page.getByRole("dialog")).toContainText("หีบว่างเปล่า");
+  const s = await saved(page);
+  expect(s.items.potion).toBe(4);
+  expect(s.progress.claimed).toEqual(["oakheart_chest"]);
+});
+
+for (const size of SIZES) {
+  test(`world, dialog and encounter fit without scrolling: ${size.name}`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await newHero(page);
+    await expectNoScroll(page);
+    await walk(page, "LUU");
+    await page.keyboard.press("e");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectNoScroll(page);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await walk(page, "DDD" + "R".repeat(10) + "R".repeat(7));
+    await page.keyboard.press("ArrowUp");
+    await expect(page.locator(".encounter")).toBeVisible();
+    await expectNoScroll(page);
+    await page.getByRole("button", { name: "ถอยกลับ" }).click();
+    await expect(world(page)).toHaveAttribute("data-pos", "8,8");
+  });
+}
+
+test("touch buttons walk the hero", async ({ page }) => {
+  await newHero(page);
+  await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerdown");
+  await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerup");
+  await expect(world(page)).toHaveAttribute("data-pos", "13,9");
+});

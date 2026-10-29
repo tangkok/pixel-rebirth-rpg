@@ -11,14 +11,26 @@ import {
 } from "./data";
 import { checkName, effectiveStats } from "./hero";
 import { parseLook, type Look } from "./looks";
+import {
+  CHECKPOINTS,
+  MAP_IDS,
+  MAPS,
+  QUEST_REWARD_ID,
+  QUEST_STATES,
+  START,
+  type CheckpointId,
+  type Dir,
+  type MapId,
+  type QuestState,
+} from "./world";
 
 export const SAVE_KEY = "echoes-of-astra-save";
 export const BACKUP_KEY = "echoes-of-astra-save-backup";
 export const SETTINGS_KEY = "echoes-of-astra-settings";
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface SaveData {
-  version: 1;
+  version: 2;
   hero: {
     name: string;
     gender: Gender;
@@ -31,12 +43,18 @@ export interface SaveData {
     mp: number;
   };
   items: Record<ItemId, number>;
+  gold: number;
   progress: {
-    map: "oakheart_village";
+    map: MapId;
     x: number;
     y: number;
-    checkpoint: string;
+    facing: Dir;
+    checkpoint: CheckpointId;
+    /** Map-scoped encounter ids that were won; they never respawn or count twice. */
     defeated: string[];
+    /** One-time chest and reward ids already granted. */
+    claimed: string[];
+    quest: { state: QuestState; kills: string[] };
   };
   savedAt: number;
 }
@@ -59,7 +77,15 @@ export function newSave(
     version: SAVE_VERSION,
     hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp },
     items: { ...STARTING_ITEMS },
-    progress: { map: "oakheart_village", x: 4, y: 10, checkpoint: "oakheart_square", defeated: [] }, // PLACEHOLDER spawn
+    gold: 0,
+    progress: {
+      ...START,
+      facing: "down",
+      checkpoint: "oakheart_square",
+      defeated: [],
+      claimed: [],
+      quest: { state: "AVAILABLE", kills: [] },
+    },
     savedAt: Date.now(),
   };
 }
@@ -68,7 +94,13 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown, min: number, max: number): v is number =>
   Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
-const ID = /^[a-z0-9_]{1,32}$/;
+const ID = /^[a-z0-9_:]{1,40}$/;
+const idList = (v: unknown, allowed: (id: string) => boolean): string[] | null =>
+  Array.isArray(v) && v.length <= 64 && v.every((x) => typeof x === "string" && ID.test(x) && allowed(x)) && new Set(v).size === v.length
+    ? [...(v as string[])]
+    : null;
+const enemyIds = new Set(Object.values(MAPS).flatMap((m) => m.entities.filter((e) => e.kind === "enemy").map((e) => e.id)));
+const claimIds = new Set([QUEST_REWARD_ID, ...Object.values(MAPS).flatMap((m) => m.entities.filter((e) => e.kind === "chest").map((e) => e.id))]);
 
 /** Validates untrusted save JSON. Returns null on anything unexpected. */
 export function parseSave(raw: string | null): SaveData | null {
@@ -79,6 +111,8 @@ export function parseSave(raw: string | null): SaveData | null {
   } catch {
     return null;
   }
+  if (!isObj(d)) return null;
+  if (d.version === 1) d = migrateV1(d);
   if (!isObj(d) || d.version !== SAVE_VERSION) return null;
   const { hero: h, items, progress: p } = d;
   if (!isObj(h) || !isObj(items) || !isObj(p)) return null;
@@ -104,14 +138,24 @@ export function parseSave(raw: string | null): SaveData | null {
     bag[id] = n;
   }
 
-  if (p.map !== "oakheart_village" || !isInt(p.x, 0, 999) || !isInt(p.y, 0, 999)) return null;
-  if (typeof p.checkpoint !== "string" || !ID.test(p.checkpoint)) return null;
-  if (
-    !Array.isArray(p.defeated) ||
-    p.defeated.length > 64 ||
-    p.defeated.some((x) => typeof x !== "string" || !ID.test(x))
-  )
-    return null;
+  if (!isInt(d.gold, 0, 9_999_999)) return null;
+  if (!MAP_IDS.includes(p.map as MapId)) return null;
+  const map = MAPS[p.map as MapId];
+  if (!isInt(p.x, 0, map.rows[0].length - 1) || !isInt(p.y, 0, map.rows.length - 1)) return null;
+  if (!["up", "down", "left", "right"].includes(p.facing as string)) return null;
+  if (typeof p.checkpoint !== "string" || !(p.checkpoint in CHECKPOINTS)) return null;
+  const defeated = idList(p.defeated, (x) => enemyIds.has(x));
+  const claimed = idList(p.claimed, (x) => claimIds.has(x));
+  if (!defeated || !claimed) return null;
+  const q = p.quest;
+  if (!isObj(q) || !QUEST_STATES.includes(q.state as QuestState)) return null;
+  const kills = idList(q.kills, (x) => defeated.includes(x));
+  if (!kills || kills.length > 3) return null;
+  // Cross-field invariants keep a hand-edited save from skipping or repeating quest steps.
+  const state = q.state as QuestState;
+  if ((state === "AVAILABLE" && kills.length) || (state === "ACTIVE" && kills.length >= 3)) return null;
+  if ((state === "READY_TO_TURN_IN" || state === "COMPLETED") && kills.length !== 3) return null;
+  if ((state === "COMPLETED") !== claimed.includes(QUEST_REWARD_ID)) return null;
   if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
 
   return {
@@ -128,14 +172,28 @@ export function parseSave(raw: string | null): SaveData | null {
       mp: h.mp,
     },
     items: bag,
+    gold: d.gold,
     progress: {
-      map: "oakheart_village",
+      map: p.map as MapId,
       x: p.x,
       y: p.y,
-      checkpoint: p.checkpoint,
-      defeated: [...p.defeated] as string[],
+      facing: p.facing as Dir,
+      checkpoint: p.checkpoint as CheckpointId,
+      defeated,
+      claimed,
+      quest: { state, kills },
     },
     savedAt: d.savedAt,
+  };
+}
+
+/** v1 saves (creation-only slice) had no world yet: keep the hero, start at the village. */
+function migrateV1(d: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...d,
+    version: 2,
+    gold: 0,
+    progress: { ...START, facing: "down", checkpoint: "oakheart_square", defeated: [], claimed: [], quest: { state: "AVAILABLE", kills: [] } },
   };
 }
 

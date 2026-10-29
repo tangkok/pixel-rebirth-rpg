@@ -1,11 +1,14 @@
-// Heroes99 v1.2 layer catalog. public/astra/h99 holds idle-pose atlases built by
+// Heroes99 v1.2 layer catalog. public/astra/h99 holds idle + run atlases built by
 // scripts/import-heroes99.py; the row order here must match that script.
 import type { ClassId, Gender } from "./data";
 
 export const FRAME_W = 100;
 export const FRAME_H = 40;
-export const STRIP_W = 800; // one idle row: 8 frame slots, 6 used
-export const IDLE_FRAMES = 6;
+export const STRIP_W = 800; // one animation row: 8 frame slots
+/** Animations each atlas variant stores, in row order. */
+export const ANIMS = { idle: { row: 0, frames: 6 }, run: { row: 1, frames: 8 } } as const;
+export type Anim = keyof typeof ANIMS;
+export const ANIM_ROWS = Object.keys(ANIMS).length;
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
@@ -57,7 +60,7 @@ export const defaultLook = (gender: Gender, classId: ClassId): Look => ({
   ...CLASS_OUTFIT[classId],
 });
 
-/** One layer: atlas URL and the 40px row inside it. */
+/** One layer: atlas URL and its variant index (the variant spans ANIM_ROWS strips). */
 export type Layer = [src: string, row: number];
 
 /** Layers bottom to top, following Heroes99's layer.gif order. */

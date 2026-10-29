@@ -156,9 +156,12 @@ Vite ใช้ Asset URL แบบ relative จึงรองรับ path `/p
 
 ## Echoes of Astra (หน้าแยก `/astra/`)
 
-เกมใหม่ตาม GDD v1.8 อยู่ที่ `astra/index.html` + `src/astra/` และเผยแพร่คู่กับ Pixel Rebirth ที่ `/astra/` โดยไม่แตะเกมเดิม ขั้นนี้มี Boot → Title → Character Creation (ชื่อ, เพศ, 5 อาชีพ, สุ่มพรสวรรค์ 3 ครั้งเลือก 1 จาก 20) → เซฟ/Continue ช่องเดียวพร้อมสำรองและตรวจข้อมูล
+เกมใหม่ตาม GDD v1.8 อยู่ที่ `astra/index.html` + `src/astra/` และเผยแพร่คู่กับ Pixel Rebirth ที่ `/astra/` โดยไม่แตะเกมเดิม
 
-- ค่าที่ GDD ยังไม่กำหนดติดป้าย `PLACEHOLDER` ใน `src/astra/data.ts` และ `src/astra/save.ts`
-- ขั้น "รูปลักษณ์" ปรับผิว ใบหน้า ทรงผม/สีผม (แยกชาย 14 แบบ หญิง 9 แบบ) ชุด/สีชุด และอาวุธ จาก layer ของ Heroes99 v1.2 (ผู้ใช้ซื้อ license แล้ว) ประกอบภาพใน browser ตามลำดับของ `layer.gif` repo เก็บเฉพาะ atlas ท่ายืน (idle) 47 ไฟล์ ไม่เก็บไฟล์ต้นฉบับ สร้างใหม่ได้ด้วย `python3 -I scripts/import-heroes99.py <Heroes99_v1.2>`
-- Heroes99 ไม่มีธนูและกระบอง Ranger และ Cleric จึงเริ่มแบบไม่ถืออาวุธ (เลือกอาวุธอื่นแทนชั่วคราวได้) และ sprite เป็นมุมข้างอย่างเดียว ยังไม่มี 4 ทิศสำหรับ top-down
-- ทดสอบ: `npm test` (tests/astra.test.ts) และ `npm run test:e2e` (tests/browser/astra.spec.ts รวมการตรวจว่าไม่มี scroll)
+- **ขั้นที่ 1:** Boot → Title → Character Creation (ชื่อ, เพศ, 5 อาชีพ, สุ่มพรสวรรค์ช่องเดียวสูงสุด 3 ครั้ง ใช้ผลล่าสุด) → เซฟ/Continue ช่องเดียวพร้อมสำรองและตรวจข้อมูล
+- **ขั้นที่ 2:** เดินสำรวจ top-down สองแผนที่ (Oakheart Village ↔ Whispering Forest) เดิน 4 ทิศด้วยลูกศร/WASD หรือปุ่มบนจอ, กด E/ปุ่มกลมเพื่อคุย/เปิดหีบ/บันทึก, เควส `forest_troubles` ของ Elaine (กำจัด Forest Wolf 3 ตัวที่มองเห็นบนแผนที่ → รับ 100 Gold + Potion ×2 ครั้งเดียว), หีบเปิดได้ครั้งเดียว, คริสตัลเป็นจุดเซฟ กฎทั้งหมดอยู่ใน `src/astra/world.ts` เป็นฟังก์ชันบริสุทธิ์ที่ทำซ้ำแล้วไม่ได้ของซ้ำ เซฟเป็นเวอร์ชัน 2 (เซฟเวอร์ชัน 1 ย้ายมาอัตโนมัติ)
+- ฉากต่อสู้ตอนนี้เป็น PLACEHOLDER (ปุ่ม "ชนะ (ทดสอบ)") ระบบเทิร์นจริงคือขั้นที่ 3
+- ค่าที่ GDD ยังไม่กำหนดติดป้าย `PLACEHOLDER` ใน `src/astra/data.ts`, `src/astra/save.ts` และ `src/astra/world.ts` (ผังแผนที่ด้วย)
+- ตัวละครใช้ layer ของ Heroes99 v1.2 (ผู้ใช้ซื้อ license แล้ว) ประกอบภาพใน browser ตามลำดับ `layer.gif` repo เก็บเฉพาะ atlas ท่ายืนและท่าวิ่ง สร้างใหม่ด้วย `python3 -I scripts/import-heroes99.py <Heroes99_v1.2>` อาวุธล็อกตามอาชีพ ธนูและกระบองวาดใหม่ด้วย `scripts/draw-weapons.py`
+- Tileset 16px และหมาป่าวาดขึ้นใหม่ทั้งหมดด้วย `python3 -I scripts/draw-world.py` (ไม่ใช่ไฟล์จาก Heroes99) ตัวละครเป็นมุมข้างจึงหันซ้าย/ขวาตอนเดินขึ้นลง
+- ทดสอบ: `npm test` (tests/astra.test.ts, tests/world.test.ts) และ `npm run test:e2e` (tests/browser/astra.spec.ts, tests/browser/world.spec.ts รวมการตรวจว่าไม่มี scroll)

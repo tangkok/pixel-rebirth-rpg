@@ -6,6 +6,7 @@ import {
   FACES,
   HAIR_COLORS,
   HAIR_STYLES,
+  ANIM_ROWS,
   layers,
   OUTFIT_COLORS,
   OUTFITS,
@@ -155,7 +156,7 @@ describe("Heroes99 looks", () => {
     for (const [src, maxRow] of rows) {
       const png = readFileSync(`public/astra/${src}`);
       expect(png.readUInt32BE(16), src).toBe(800); // PNG IHDR width
-      expect(png.readUInt32BE(20), src).toBe((maxRow + 1) * 40); // atlas has exactly the rows used
+      expect(png.readUInt32BE(20), src).toBe((maxRow + 1) * 40 * ANIM_ROWS); // idle + run strip per variant
     }
   });
   it("weapon is fixed by class (Knight sword, Ranger bow, Sorcerer staff, Cleric mace, Berserk axe)", () => {

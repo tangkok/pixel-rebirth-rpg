@@ -1,25 +1,34 @@
-"""Draw the original bow and mace layers Heroes99 lacks, in its idle-atlas format.
+"""Draw the original bow and mace layers Heroes99 lacks, in its atlas format.
 
 Usage: python3 -I scripts/draw-weapons.py   (run after import-heroes99.py)
-Uses the Heroes99 sword atlas only to follow the hand's bob per idle frame, and the
+Uses the Heroes99 sword atlas only to follow the hand (its gold hilt) per frame, and the
 pack's palette so the new pixels sit with the rest of the art. Writes
-public/astra/h99/weapon/{bow,mace}.png: row 0 behind the body, row 1 in front.
+public/astra/h99/weapon/{bow,mace}.png with rows: back idle, back run, front idle, front run.
 """
 from pathlib import Path
 
 from PIL import Image
 
 H99 = Path(__file__).resolve().parent.parent / "public/astra/h99"
-FRAMES, FW, FH = 6, 100, 40
+FW, FH = 100, 40
+ANIMS = (6, 8)  # idle, run frame counts; atlas rows per variant follow this order
 OUT, DARK, BROWN, WOOD, GOLD, LIGHT = "#240000", "#582820", "#833f1e", "#a8642a", "#c67b02", "#faca58"
 STEEL, STEEL_D, STEEL_L, STRING = "#628d8d", "#31526b", "#a9d0cc", "#e8e0c8"
 
 
-def hand_offsets() -> list[tuple[int, int]]:
-    """(dx, dy) of each idle frame's sword relative to frame 0 = how the hand moves."""
+def hand_offsets(anim: int) -> list[tuple[int, int]]:
+    """(dx, dy) of the sword hilt in each frame of an animation, relative to idle frame 0."""
     sword = Image.open(H99 / "weapon/weapon1.png").convert("RGBA")
-    boxes = [sword.crop((i * FW, FH, i * FW + FW, 2 * FH)).getbbox() for i in range(FRAMES)]
-    return [(b[0] - boxes[0][0], b[1] - boxes[0][1]) for b in boxes]
+    front = len(ANIMS)  # front-layer rows start after the back-layer rows
+
+    def hilt(row: int, f: int) -> tuple[float, float]:
+        px = sword.crop((f * FW, row * FH, f * FW + FW, row * FH + FH)).load()
+        gold = [(x, y) for x in range(FW) for y in range(FH) if px[x, y][3] and px[x, y][0] > 150 and px[x, y][2] < 90]
+        return sum(x for x, _ in gold) / len(gold), sum(y for _, y in gold) / len(gold)
+
+    x0, y0 = hilt(front, 0)
+    # The swung sword's hilt drifts forward as the blade tilts; the hand itself barely does.
+    return [(max(-2, min(2, round(x - x0))), round(y - y0)) for x, y in (hilt(front + anim, f) for f in range(ANIMS[anim]))]
 
 
 def put(img: Image.Image, pts, color: str, dx: int, dy: int, frame: int) -> None:
@@ -70,18 +79,19 @@ def bow(front: Image.Image, back: Image.Image, frame: int, dx: int, dy: int) -> 
 
 
 def main() -> None:
-    offsets = hand_offsets()
+    n = len(ANIMS)
     for name in ("bow", "mace"):
-        back = Image.new("RGBA", (FW * 8, FH))
-        front = Image.new("RGBA", (FW * 8, FH))
-        for i, (dx, dy) in enumerate(offsets):
-            if name == "bow":
-                bow(front, back, i, dx, dy)
-            else:
-                mace(front, i, dx, dy)
-        sheet = Image.new("RGBA", (FW * 8, FH * 2))
-        sheet.paste(back, (0, 0))
-        sheet.paste(front, (0, FH))
+        sheet = Image.new("RGBA", (FW * 8, FH * 2 * n))
+        for anim in range(n):
+            back = Image.new("RGBA", (FW * 8, FH))
+            front = Image.new("RGBA", (FW * 8, FH))
+            for i, (dx, dy) in enumerate(hand_offsets(anim)):
+                if name == "bow":
+                    bow(front, back, i, dx, dy)
+                else:
+                    mace(front, i, dx, dy)
+            sheet.paste(back, (0, FH * anim))
+            sheet.paste(front, (0, FH * (n + anim)))
         sheet.save(H99 / f"weapon/{name}.png", optimize=True)
 
 

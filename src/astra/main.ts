@@ -3,6 +3,8 @@ import "@fontsource-variable/dm-sans";
 import "@fontsource/noto-sans-thai/400.css";
 import "@fontsource/noto-sans-thai/600.css";
 import "./astra.css";
+import { explore } from "./explore";
+import { button, composite, h, heroSprite, root, setSettings, settings, show, still, store, type Child } from "./ui";
 import {
   CLASSES,
   CLASS_IDS,
@@ -20,7 +22,6 @@ import { checkName, describeTalent, effectiveStats, NAME_MAX, rollTalent } from 
 import {
   loadSave,
   newSave,
-  parseSettings,
   SETTINGS_KEY,
   writeSave,
   type SaveData,
@@ -30,141 +31,14 @@ import {
   CLASS_OUTFIT,
   defaultLook,
   FACES,
-  FRAME_H,
-  FRAME_W,
   HAIR_COLORS,
   HAIR_STYLES,
-  IDLE_FRAMES,
-  layers,
   OUTFIT_COLORS,
   OUTFITS,
-  STRIP_W,
   SKINS,
   type Look,
 } from "./looks";
 
-const root = document.querySelector<HTMLElement>("#astra")!;
-
-// localStorage can throw (private mode, blocked storage); the game still runs for the session.
-const memory = new Map<string, string>();
-const store = {
-  getItem(k: string) {
-    try {
-      return localStorage.getItem(k);
-    } catch {
-      return memory.get(k) ?? null;
-    }
-  },
-  setItem(k: string, v: string) {
-    try {
-      localStorage.setItem(k, v);
-    } catch {
-      memory.set(k, v);
-      throw new Error("storage unavailable");
-    }
-  },
-};
-
-let settings: Settings = parseSettings(store.getItem(SETTINGS_KEY));
-
-type Child = Node | string | false | null | undefined;
-function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> & { class?: string; data?: Record<string, string>; aria?: Record<string, string> } = {},
-  ...children: Child[]
-): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tag);
-  const { class: cls, data, aria, ...rest } = props;
-  if (cls) el.className = cls;
-  Object.assign(el, rest);
-  for (const [k, v] of Object.entries(data ?? {})) el.dataset[k] = v;
-  for (const [k, v] of Object.entries(aria ?? {})) el.setAttribute(`aria-${k}`, v);
-  // Children are appended as nodes/text so user strings are never parsed as HTML.
-  for (const c of children) if (c) el.append(c);
-  return el;
-}
-
-const button = (label: string, onclick: () => void, extra: Partial<HTMLButtonElement> & { class?: string; aria?: Record<string, string> } = {}) =>
-  h("button", { type: "button", onclick, ...extra, class: `btn ${extra.class ?? ""}` }, label);
-
-function show(...nodes: Node[]) {
-  // Re-renders keep keyboard focus on the same control (matched by its aria-label).
-  const prev = document.activeElement?.getAttribute("aria-label");
-  root.replaceChildren(...nodes);
-  const same = prev ? root.querySelector<HTMLElement>(`[aria-label="${CSS.escape(prev)}"]`) : null;
-  (same ?? root.querySelector<HTMLElement>("[autofocus], .btn:not(:disabled)"))?.focus({ preventScroll: true });
-  fitSprites();
-}
-
-// ---------- hero sprite (Heroes99 layers composited in the browser) ----------
-const images = new Map<string, Promise<HTMLImageElement>>();
-const loadImage = (src: string) => {
-  let p = images.get(src);
-  if (!p) {
-    p = new Promise((ok, fail) => {
-      const img = new Image();
-      img.onload = () => ok(img);
-      img.onerror = () => fail(new Error(src));
-      img.src = src;
-    });
-    p.catch(() => images.delete(src)); // allow a retry after a failed load
-    images.set(src, p);
-  }
-  return p;
-};
-
-const sheets = new Map<string, Promise<HTMLCanvasElement>>();
-function composite(look: Look, classId: ClassId) {
-  const parts = layers(look, classId);
-  const key = parts.join("|");
-  let p = sheets.get(key);
-  if (!p) {
-    p = Promise.all(parts.map(([src]) => loadImage(src))).then((imgs) => {
-      const c = h("canvas", { width: STRIP_W, height: FRAME_H });
-      const ctx = c.getContext("2d")!;
-      imgs.forEach((img, i) => ctx.drawImage(img, 0, parts[i][1] * FRAME_H, STRIP_W, FRAME_H, 0, 0, STRIP_W, FRAME_H));
-      return c;
-    });
-    p.catch(() => sheets.delete(key));
-    sheets.set(key, p);
-  }
-  return p;
-}
-
-const still = () => settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function heroSprite(look: Look, classId: ClassId, label: string) {
-  const canvas = h("canvas", { class: "sprite", width: FRAME_W, height: FRAME_H });
-  const box = h("div", { class: "sprite-box", role: "img", aria: { label } } as never, canvas);
-  const ctx = canvas.getContext("2d")!;
-  composite(look, classId).then(
-    (sheet) => {
-      let f = 0;
-      const draw = () => {
-        ctx.clearRect(0, 0, FRAME_W, FRAME_H);
-        ctx.drawImage(sheet, f * FRAME_W, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
-      };
-      draw();
-      const timer = setInterval(() => {
-        if (!canvas.isConnected) return clearInterval(timer);
-        if (still()) return;
-        f = (f + 1) % IDLE_FRAMES;
-        draw();
-      }, 130);
-    },
-    () => box.classList.add("missing"),
-  );
-  return box;
-}
-
-/** Integer pixel scale so the 100×40 frame stays crisp and fits its box. */
-function fitSprites() {
-  for (const box of root.querySelectorAll<HTMLElement>(".sprite-box")) {
-    const k = Math.max(1, Math.floor(Math.min(box.clientWidth / 100, box.clientHeight / 40)));
-    box.style.setProperty("--k", String(k));
-  }
-}
-addEventListener("resize", fitSprites);
 
 // ---------- boot ----------
 async function boot() {
@@ -197,7 +71,7 @@ function title(notice = "") {
         "nav",
         { class: "menu", aria: { label: "เมนูหลัก" } },
         button("New Game", () => (save ? confirmOverwrite(save) : creation()), { class: "primary" }),
-        button("Continue", () => save && adventure(save), {
+        button("Continue", () => save && explore(save, title), {
           disabled: !save,
           aria: { describedby: "continue-note" },
         }),
@@ -242,7 +116,7 @@ function settingsPanel(back: () => void) {
       type: "checkbox",
       checked: settings[key],
       onchange: () => {
-        settings = { ...settings, [key]: input.checked };
+        setSettings({ ...settings, [key]: input.checked });
         try {
           store.setItem(SETTINGS_KEY, JSON.stringify(settings));
         } catch {
@@ -464,7 +338,7 @@ function creation() {
     const name = nameCheck();
     if (!name.ok || !d.classId || !d.talent) return;
     const save = newSave(name.name, d.gender, d.classId, d.talent.id, d.look);
-    adventure(save, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
+    explore(save, title, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
   }
 
   render();
@@ -507,29 +381,6 @@ function talentCard(t: TalentDef) {
     h("span", { class: "minus" }, minus.join(" · ")),
   ];
   return h("div", { class: `talent ${t.rarity}` }, ...body);
-}
-
-// ---------- after creation (milestone 2 starts here) ----------
-function adventure(save: SaveData, notice = "") {
-  const hero = save.hero;
-  const t = talentById(hero.talentId)!;
-  const s = effectiveStats(hero.classId, hero.talentId);
-  show(
-    h(
-      "main",
-      { class: "screen create" },
-      h("header", { class: "area" }, h("b", {}, "Oakheart Village"), h("span", { role: "status" }, notice)),
-      heroSprite(hero.look, hero.classId, `${hero.name} ${CLASSES[hero.classId].name}`),
-      h(
-        "section",
-        { class: "panel" },
-        h("h2", { class: "hero-name" }, hero.name),
-        h("p", { class: "meta" }, `Lv.${hero.level} ${CLASSES[hero.classId].name} · ${t.name} · HP ${hero.hp}/${s.maxHp} · MP ${hero.mp}/${s.maxMp}`),
-        h("p", { class: "hint" }, "การสำรวจแบบ top-down และการดวลแบบ side-view จะมาในขั้นถัดไป"),
-      ),
-      h("footer", { class: "row" }, button("กลับหน้าแรก", () => title(), { class: "primary" })),
-    ),
-  );
 }
 
 document.documentElement.classList.toggle("reduced", settings.reducedMotion);

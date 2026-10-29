@@ -1,8 +1,9 @@
 """Build the idle-pose atlases the character creator uses from a licensed Heroes99 v1.2 pack.
 
 Usage: python3 -I scripts/import-heroes99.py /path/to/Heroes99_v1.2
-Each atlas stacks the idle row (top 800x40 strip, 6 frames) of every variant in a fixed
-order that src/astra/looks.ts mirrors. Only this strip ships, not the full source sheets.
+Each atlas stacks, per variant in a fixed order that src/astra/looks.ts mirrors, the idle
+strip (source row 0, 6 frames) then the run strip (source row 2, 8 frames), 800x40 each.
+Only these strips ship, not the full source sheets.
 Requires Pillow.
 """
 import sys
@@ -10,13 +11,16 @@ from pathlib import Path
 
 from PIL import Image
 
-STRIP = (0, 0, 800, 40)
+SOURCE_ROWS = (0, 2)  # idle1, run1
 
 
 def atlas(paths: list[Path], out: Path) -> None:
-    sheet = Image.new("RGBA", (800, 40 * len(paths)))
+    n = len(SOURCE_ROWS)
+    sheet = Image.new("RGBA", (800, 40 * n * len(paths)))
     for i, p in enumerate(paths):
-        sheet.paste(Image.open(p).convert("RGBA").crop(STRIP), (0, 40 * i))
+        img = Image.open(p).convert("RGBA")
+        for j, row in enumerate(SOURCE_ROWS):
+            sheet.paste(img.crop((0, 40 * row, 800, 40 * row + 40)), (0, 40 * (i * n + j)))
     out.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(out, optimize=True)
 

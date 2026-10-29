@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { TALENTS } from "../../src/astra/data";
 
 const SIZES = [
   { name: "phone portrait", width: 375, height: 667 },
@@ -24,14 +25,14 @@ async function expectNoScroll(page: Page) {
   expect(m.offscreen).toEqual([]);
 }
 
-async function expectSpriteDrawn(page: Page) {
+async function expectSpriteDrawn(page: Page, selector = "canvas.sprite") {
   await expect
     .poll(() =>
-      page.evaluate(() => {
-        const c = document.querySelector<HTMLCanvasElement>("canvas.sprite")!;
+      page.evaluate((sel) => {
+        const c = document.querySelector<HTMLCanvasElement>(sel)!;
         const px = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
         return px.some((v, i) => i % 4 === 3 && v > 0);
-      }),
+      }, selector),
     )
     .toBe(true);
 }
@@ -79,7 +80,7 @@ for (const size of SIZES) {
     await expect(page.getByRole("button", { name: "New Game" })).toBeVisible();
     await expectNoScroll(page);
     await create(page, "สวย", true);
-    await expect(page.locator(".hero-name")).toHaveText("สวย");
+    await expect(page.locator(".hud-stats")).toContainText("สวย Lv.1");
     await expectNoScroll(page);
   });
 }
@@ -89,12 +90,14 @@ test("Continue restores the hero and chosen talent after refresh", async ({ page
   const talent = await create(page, "สวย");
   await page.reload();
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.locator(".hero-name")).toHaveText("สวย");
-  await expect(page.locator(".meta")).toContainText(`Ranger · ${talent}`);
+  await expect(page.locator(".hud-stats")).toContainText("สวย Lv.1");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero);
+  expect(saved.classId).toBe("ranger");
+  expect(TALENTS.find((t) => t.id === saved.talentId)?.name).toBe(talent);
   const look = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero.look);
   expect(look).toEqual(expect.objectContaining({ hair: "f3", outfit: 11 }));
   expect(look).not.toHaveProperty("weapon");
-  await expectSpriteDrawn(page);
+  await expectSpriteDrawn(page, "canvas.world-canvas");
 });
 
 test("talent roll animates in one slot", async ({ page }) => {
@@ -126,6 +129,7 @@ test("text stays light even if the host page styles body dark", async ({ page })
 
 test("New Game asks before overwriting a save and Cancel keeps it", async ({ page }) => {
   await create(page, "First");
+  await page.getByRole("button", { name: "เมนู" }).click();
   await page.getByRole("button", { name: "กลับหน้าแรก" }).click();
   await page.getByRole("button", { name: "New Game" }).click();
   await expect(page.getByRole("alertdialog")).toContainText("First");
@@ -141,6 +145,6 @@ test("names are validated and rendered as text", async ({ page }) => {
   await expect(next).toBeDisabled();
   await page.getByRole("button", { name: "ยกเลิก" }).click();
   await create(page, "<b>x</b>");
-  await expect(page.locator(".hero-name")).toHaveText("<b>x</b>");
-  await expect(page.locator(".hero-name b")).toHaveCount(0);
+  await expect(page.locator(".hud-stats")).toContainText("<b>x</b> Lv.1");
+  await expect(page.locator(".hud b")).toHaveCount(0);
 });
