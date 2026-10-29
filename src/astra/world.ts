@@ -11,7 +11,8 @@ export const TILE = 16;
 export const TILE_NAMES = [
   "grass", "grass_tuft", "flowers", "path", "water", "tree", "bush", "wall", "roof", "door", "fence",
   "rock", "forest", "forest_path", "forest_tree", "crystal", "chest", "chest_open", "sign", "bridge",
-  "forest_chest", "forest_chest_open",
+  "forest_chest", "forest_chest_open", "cobble", "cobble_worn", "plaza", "lamp", "barrel", "crate", "planter",
+  "plaza_worn", "plaza_crystal",
 ] as const;
 export type TileName = (typeof TILE_NAMES)[number];
 export const tileIndex = (t: TileName) => TILE_NAMES.indexOf(t);
@@ -19,9 +20,43 @@ export const tileIndex = (t: TileName) => TILE_NAMES.indexOf(t);
 const LEGEND: Record<string, TileName> = {
   ".": "grass", ",": "grass_tuft", "*": "flowers", "=": "path", "~": "water", T: "tree", b: "bush",
   W: "wall", R: "roof", D: "door", F: "fence", o: "rock", f: "forest", _: "forest_path",
-  Y: "forest_tree", B: "bridge",
+  Y: "forest_tree", B: "bridge", c: "cobble", k: "cobble_worn", p: "plaza", L: "lamp", r: "barrel", x: "crate",
+  P: "planter", q: "plaza_worn",
 };
-const SOLID = new Set<TileName>(["water", "tree", "bush", "wall", "roof", "door", "fence", "rock", "forest_tree"]);
+const SOLID = new Set<TileName>([
+  "water", "tree", "bush", "wall", "roof", "door", "fence", "rock", "forest_tree", "lamp", "barrel", "crate", "planter",
+]);
+
+/**
+ * Big sprites drawn over the tiles: Pixel-Deck buildings (80x80, public/astra/world/buildings.png
+ * in this order, scripts/import-village.py) and the fountain (48x48). `foot` is the solid part in
+ * tiles relative to the sprite's top-left [x0, x1, y0, y1]; rows above it are roof the hero walks behind.
+ */
+export const PROP_ART = {
+  town_hall: { cell: 0, foot: [0, 4, 2, 4] },
+  church: { cell: 1, foot: [0, 4, 2, 4] },
+  library: { cell: 2, foot: [0, 4, 2, 4] },
+  clock_tower: { cell: 3, foot: [1, 4, 2, 4] },
+  mansion: { cell: 4, foot: [0, 4, 2, 4] },
+  mayors: { cell: 5, foot: [0, 4, 2, 4] },
+  tavern: { cell: 6, foot: [0, 4, 2, 4] },
+  general_store: { cell: 7, foot: [0, 4, 2, 4] },
+  blacksmith: { cell: 8, foot: [0, 4, 2, 4] },
+  bakery: { cell: 9, foot: [0, 4, 2, 4] },
+  guild: { cell: 10, foot: [0, 4, 2, 4] },
+  merchant: { cell: 11, foot: [0, 4, 2, 4] },
+  doctors: { cell: 12, foot: [0, 4, 2, 4] },
+  noble: { cell: 13, foot: [0, 4, 2, 3] },
+  town_house: { cell: 14, foot: [1, 3, 2, 4] },
+  florist: { cell: 15, foot: [0, 4, 2, 4] },
+  post: { cell: 16, foot: [0, 4, 2, 4] },
+  tailor: { cell: 17, foot: [0, 4, 2, 4] },
+  mill: { cell: 18, foot: [0, 4, 2, 4] },
+  herbalist: { cell: 19, foot: [0, 4, 2, 4] },
+  fountain: { cell: -1, foot: [0, 2, 1, 2] },
+} as const;
+export type PropArt = keyof typeof PROP_ART;
+export const BUILDING_PX = 80;
 
 export type MapId = "oakheart_village" | "whispering_forest";
 export const MAP_IDS: MapId[] = ["oakheart_village", "whispering_forest"];
@@ -42,6 +77,7 @@ export interface WorldMap {
   entities: Entity[];
   /** Stepping on (x, y) moves the hero to `to` at the arrival anchor. */
   exits: { x: number; y: number; to: MapId; ax: number; ay: number }[];
+  props?: { art: PropArt; x: number; y: number }[];
 }
 
 // PLACEHOLDER layouts: the GDD's world poster is mood reference only, not a tile map.
@@ -50,30 +86,65 @@ export const MAPS: Record<MapId, WorldMap> = {
     id: "oakheart_village",
     name: "Oakheart Village",
     rows: [
-      "TTTTTTTTTTTTTTTTTTTTTTTT",
-      "T..,....RRRR.....RRRR..T",
-      "T.*.....RRRR..,..RRRR..T",
-      "T.......WDWW.....WWDW.,T",
-      "T..b.....=........=....T",
-      "T........==========....T",
-      "T.,......=...*....=..b.T",
-      "T..RRRR..=........=....T",
-      "T..RRRR..=........=....T",
-      "T..WWDW..=........=....T",
-      "T.....====........======",
-      "T..*.....=..~~~~..=....T",
-      "T........=..~~~~..=..,.T",
-      "T.FFFFF..=.......b=....T",
-      "T........==========..*.T",
-      "TTTTTTTTTTTTTTTTTTTTTTTT",
+      "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+      "T........................,..,..*...,.,.T",
+      "T....,.,...*,....................,..,..T",
+      "T.....,,.............,.........,.......T",
+      "T..*..........*........*,..............T",
+      "TT.,......,......................,..,.TT",
+      "TcccccccckckccckLccccccLccckcccccLcckccT",
+      "TcccccLcccckcccckccccccckccccccccccccccT",
+      "T..,..,k.....LkPccccccccPcL.....k*,....T",
+      "T......k.....cpppppppqppppc.....k......T",
+      "T......k.....cppqpppppppppc....,k.,..,.T",
+      "T......k...,.cppppppppqpppc.....k.,....T",
+      "T..,...r....rkpppqppppppppc*...rk..,...T",
+      "Tb.....r..,.xcpppppppppqppc.,..xk..L.*bT",
+      "Tccccccckcccccppppqpppppppccccckcccccccc",
+      "TcckcccccccckkppppppppppqpcccckccccckccT",
+      "T,.,L..k.....cpppppqppppppk.....k......T",
+      "T..*.,.k.,...cqppppppppppqc..,*.k,.....T",
+      "T....,.k,...,cppppppqpppppc....,k.,....T",
+      "T....,.k.....LcPccccccckPcL,....k.....bT",
+      "Tcccccccccccccxccccckccccccccck......,.T",
+      "T.,.,.....,......*.......,..........~~~T",
+      "T......*.......,......,.............~~~T",
+      "T*..,..,.....,..,....,..*.....*,....~~~T",
+      "T,...***..,..........,..............~~~T",
+      "T,...,,......,..*..............*....~~~T",
+      "Tb....,...,...T..............*...*,..,bT",
+      "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+    ],
+    props: [
+      { art: "church", x: 2, y: 1 },
+      { art: "library", x: 8, y: 1 },
+      { art: "town_hall", x: 17, y: 1 },
+      { art: "clock_tower", x: 23, y: 1 },
+      { art: "mansion", x: 29, y: 1 },
+      { art: "mayors", x: 34, y: 1 },
+      { art: "tavern", x: 2, y: 8 },
+      { art: "general_store", x: 8, y: 8 },
+      { art: "guild", x: 27, y: 8 },
+      { art: "merchant", x: 33, y: 8 },
+      { art: "blacksmith", x: 2, y: 16 },
+      { art: "bakery", x: 8, y: 16 },
+      { art: "doctors", x: 27, y: 16 },
+      { art: "noble", x: 33, y: 16 },
+      { art: "town_house", x: 3, y: 21 },
+      { art: "florist", x: 9, y: 21 },
+      { art: "post", x: 15, y: 21 },
+      { art: "tailor", x: 21, y: 21 },
+      { art: "herbalist", x: 26, y: 21 },
+      { art: "mill", x: 31, y: 21 },
+      { art: "fountain", x: 18, y: 12 },
     ],
     entities: [
-      { kind: "npc", id: "npc_scout_elaine", x: 12, y: 7 },
-      { kind: "crystal", id: "oakheart_square", x: 14, y: 8 },
-      { kind: "chest", id: "oakheart_chest", x: 2, y: 12, item: "potion", count: 1 },
-      { kind: "sign", id: "oakheart_sign", x: 21, y: 9, text: "→ Whispering Forest" },
+      { kind: "npc", id: "npc_scout_elaine", x: 22, y: 11 },
+      { kind: "crystal", id: "oakheart_square", x: 16, y: 16 },
+      { kind: "chest", id: "oakheart_chest", x: 37, y: 26, item: "potion", count: 1 },
+      { kind: "sign", id: "oakheart_sign", x: 37, y: 13, text: "→ Whispering Forest" },
     ],
-    exits: [{ x: 23, y: 10, to: "whispering_forest", ax: 1, ay: 8 }],
+    exits: [{ x: 39, y: 14, to: "whispering_forest", ax: 1, ay: 8 }],
   },
   whispering_forest: {
     id: "whispering_forest",
@@ -104,14 +175,14 @@ export const MAPS: Record<MapId, WorldMap> = {
       { kind: "chest", id: "forest_chest", x: 25, y: 2, item: "frost_shard", count: 1 },
       { kind: "sign", id: "shrine_sign", x: 16, y: 1, text: "Ancient Shrine · ทางถูกหินปิดไว้ (มาในขั้นถัดไป)" },
     ],
-    exits: [{ x: 0, y: 8, to: "oakheart_village", ax: 22, ay: 10 }],
+    exits: [{ x: 0, y: 8, to: "oakheart_village", ax: 38, ay: 14 }],
   },
 };
 
 export type CheckpointId = "oakheart_square" | "forest_clearing";
 /** Where a checkpoint restores the hero: the tile in front of its crystal. */
 export const CHECKPOINTS: Record<CheckpointId, { map: MapId; x: number; y: number }> = {
-  oakheart_square: { map: "oakheart_village", x: 14, y: 9 },
+  oakheart_square: { map: "oakheart_village", x: 16, y: 17 },
   forest_clearing: { map: "whispering_forest", x: 3, y: 11 },
 };
 export const START = CHECKPOINTS.oakheart_square;
@@ -130,9 +201,24 @@ export function entityAt(map: WorldMap, save: SaveData, x: number, y: number) {
   return liveEntities(map, save).find((e) => e.x === x && e.y === y) ?? null;
 }
 
+const footprints = new Map<MapId, Set<string>>();
+/** Tiles covered by the solid part of a building or the fountain. */
+export function underProp(map: WorldMap, x: number, y: number): boolean {
+  let set = footprints.get(map.id);
+  if (!set) {
+    set = new Set();
+    for (const p of map.props ?? []) {
+      const [x0, x1, y0, y1] = PROP_ART[p.art].foot;
+      for (let yy = p.y + y0; yy <= p.y + y1; yy++) for (let xx = p.x + x0; xx <= p.x + x1; xx++) set.add(`${xx},${yy}`);
+    }
+    footprints.set(map.id, set);
+  }
+  return set.has(`${x},${y}`);
+}
+
 export function walkable(map: WorldMap, save: SaveData, x: number, y: number): boolean {
   const t = tileAt(map, x, y);
-  return t !== null && !SOLID.has(t) && !entityAt(map, save, x, y);
+  return t !== null && !SOLID.has(t) && !underProp(map, x, y) && !entityAt(map, save, x, y);
 }
 
 /** What the hero can interact with: the tile it faces first, then any other neighbour. */

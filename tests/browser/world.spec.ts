@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { SaveData } from "../../src/astra/save";
+import { MAPS, START, walkable, type MapId } from "../../src/astra/world";
 
 const SIZES = [
   { name: "phone portrait", width: 375, height: 667 },
@@ -36,8 +38,9 @@ async function newHero(page: Page) {
   await expect(page.locator(".slot.landed")).toHaveCount(1);
   await next.click();
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
-  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+  await expect(world(page)).toHaveAttribute("data-pos", AT_START);
 }
+const AT_START = `${START.x},${START.y}`;
 
 const world = (page: Page) => page.locator("main.world");
 const KEY = { L: "ArrowLeft", R: "ArrowRight", U: "ArrowUp", D: "ArrowDown" } as const;
@@ -78,26 +81,62 @@ async function fight(page: Page, key: keyof typeof KEY) {
   await back.click();
   await expect(world(page)).toBeVisible();
 }
+/** Shortest key path on the current village map to a tile where `goal` holds (BFS over the real map). */
+async function goTo(page: Page, goal: (x: number, y: number) => boolean) {
+  const id = (await world(page).getAttribute("data-map")) as MapId;
+  const [sx, sy] = (await world(page).getAttribute("data-pos"))!.split(",").map(Number);
+  const m = MAPS[id];
+  const none = { progress: { defeated: [], claimed: [] } } as unknown as SaveData;
+  const prev = new Map<string, [string, string]>([[`${sx},${sy}`, ["", ""]]]);
+  const queue: [number, number][] = [[sx, sy]];
+  for (const [x, y] of queue) {
+    if (goal(x, y)) {
+      let path = "";
+      for (let k = `${x},${y}`; prev.get(k)![0]; k = prev.get(k)![0]) path = prev.get(k)![1] + path;
+      return walk(page, path);
+    }
+    if (m.exits.some((e) => e.x === x && e.y === y) && !(x === sx && y === sy)) continue; // leaving ends the route
+    for (const [c, dx, dy] of [["L", -1, 0], ["R", 1, 0], ["U", 0, -1], ["D", 0, 1]] as const) {
+      const k = `${x + dx},${y + dy}`;
+      if (prev.has(k) || !walkable(m, none, x + dx, y + dy)) continue;
+      prev.set(k, [`${x},${y}`, c]);
+      queue.push([x + dx, y + dy]);
+    }
+  }
+  throw new Error("no route");
+}
+const village = MAPS.oakheart_village;
+const near = (kind: string) => {
+  const e = village.entities.find((x) => x.kind === kind)!;
+  return (x: number, y: number) => Math.abs(x - e.x) + Math.abs(y - e.y) === 1;
+};
+const toElaine = (page: Page) => goTo(page, near("npc"));
+/** Through the village's east exit into the forest at (1,8). */
+async function toForest(page: Page) {
+  const exit = village.exits[0];
+  await goTo(page, (x, y) => x === exit.x && y === exit.y);
+  await expect(world(page)).toHaveAttribute("data-map", "whispering_forest");
+  await expect(world(page)).toHaveAttribute("data-pos", "1,8");
+}
 const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!));
 
 test.beforeEach(async ({ page }) => {
+  test.setTimeout(120_000); // the town is large and headless canvas rendering is slow
   await page.goto("/astra/");
   await page.evaluate(() => localStorage.clear());
   await page.reload();
 });
 
 test("full forest_troubles loop survives reloads without duplicate credit", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   await newHero(page);
-  await walk(page, "LUU");
+  await toElaine(page);
   await page.keyboard.press("e");
   await expect(page.getByRole("dialog")).toContainText("Forest Wolf สามตัว");
   await page.getByRole("button", { name: "รับภารกิจ" }).dblclick();
   await expect(world(page)).toHaveAttribute("data-quest", "ACTIVE");
 
-  await walk(page, "DDD" + "R".repeat(10));
-  await expect(world(page)).toHaveAttribute("data-map", "whispering_forest");
-  await expect(world(page)).toHaveAttribute("data-pos", "1,8");
+  await toForest(page);
   await walk(page, "R".repeat(7));
   await fight(page, "U");
   await expect(world(page)).toHaveAttribute("data-pos", "8,8");
@@ -117,7 +156,7 @@ test("full forest_troubles loop survives reloads without duplicate credit", asyn
 
   await walk(page, "L".repeat(15) + "UUU" + "L");
   await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
-  await walk(page, "L".repeat(9) + "UUU");
+  await toElaine(page);
   const before = (await saved(page)).items.potion;
   await page.keyboard.press("e");
   await page.getByRole("button", { name: /รับรางวัล/ }).dblclick();
@@ -139,14 +178,13 @@ test("full forest_troubles loop survives reloads without duplicate credit", asyn
 test("crystal saves and the chest opens once", async ({ page }) => {
   await newHero(page);
   await page.keyboard.press("ArrowUp"); // the crystal blocks the step; the hero turns to it
-  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+  await expect(world(page)).toHaveAttribute("data-pos", AT_START);
   await expect(page.locator(".act")).toHaveText("บันทึก");
   await page.locator(".act").click();
   await page.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(page.locator(".toast")).toContainText("บันทึกเกมแล้ว");
 
-  await walk(page, "D" + "L".repeat(11) + "DD");
-  await page.keyboard.press("ArrowLeft");
+  await goTo(page, near("chest"));
   await expect(page.locator(".act")).toHaveText("เปิดหีบ");
   await page.keyboard.press("e");
   await expect(page.locator(".toast")).toContainText("Potion ×1");
@@ -162,13 +200,14 @@ for (const size of SIZES) {
     await page.setViewportSize(size);
     await newHero(page);
     await expectNoScroll(page);
-    await walk(page, "LUU");
+    await toElaine(page);
     await page.keyboard.press("e");
     await expect(page.getByRole("dialog")).toBeVisible();
     await expectNoScroll(page);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toBeHidden();
-    await walk(page, "DDD" + "R".repeat(10) + "R".repeat(7));
+    await toForest(page);
+    await walk(page, "R".repeat(7));
     await page.keyboard.press("ArrowUp");
     await expect(page.locator(".encounter")).toBeVisible();
     await expect(page.locator(".intent")).toContainText("Bite");
@@ -184,12 +223,13 @@ test("touch buttons walk the hero", async ({ page }) => {
   await newHero(page);
   await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerdown");
   await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerup");
-  await expect(world(page)).toHaveAttribute("data-pos", "13,9");
+  await expect(world(page)).toHaveAttribute("data-pos", `${START.x - 1},${START.y}`);
 });
 
 test("a well-timed tap scores Perfect/Good and fills Astra; a missed cue counts as Normal", async ({ page }) => {
   await newHero(page);
-  await walk(page, "DRRRRRRRRR" + "R".repeat(7));
+  await toForest(page);
+  await walk(page, "R".repeat(7));
   await page.keyboard.press("ArrowUp");
   await expect(page.locator(".encounter")).toBeVisible();
   // Press Space in-page exactly when the ring meets its target (700 ms after the cue appears).
@@ -214,7 +254,7 @@ test("a well-timed tap scores Perfect/Good and fills Astra; a missed cue counts 
 
 test("losing a duel returns to the checkpoint at full HP and keeps the wolf", async ({ page }) => {
   await newHero(page);
-  await walk(page, "DRRRRRRRRR"); // to the forest exit
+  await toForest(page);
   await walk(page, "R".repeat(7));
   await expect(world(page)).toHaveAttribute("data-pos", "8,8");
   await page.getByRole("button", { name: "เมนู" }).click();
@@ -230,7 +270,7 @@ test("losing a duel returns to the checkpoint at full HP and keeps the wolf", as
   await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
   await page.getByRole("button", { name: "กลับไปจุดเซฟ" }).click();
   await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
-  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+  await expect(world(page)).toHaveAttribute("data-pos", AT_START);
   const s = await saved(page);
   const [, max] = (await page.locator(".hud-stats").textContent())!.match(/HP (\d+)\/(\d+)/)!.slice(1).map(Number);
   expect(s.hero.hp).toBe(max); // full, whatever the rolled talent did to MaxHP

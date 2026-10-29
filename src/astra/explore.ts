@@ -5,9 +5,10 @@ import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
-import { button, composite, crisp, h, show, still, store } from "./ui";
+import { button, composite, crisp, h, settings, show, still, store } from "./ui";
 import {
   acceptQuest,
+  BUILDING_PX,
   CHECKPOINTS,
   claimQuestReward,
   elaineNode,
@@ -16,6 +17,7 @@ import {
   liveEntities,
   MAPS,
   openChest,
+  PROP_ART,
   questLine,
   recordVictory,
   setCheckpoint,
@@ -45,12 +47,43 @@ const img = (src: string) =>
     i.onerror = () => fail(new Error(src));
     i.src = src;
   });
-let art: Promise<[HTMLImageElement, HTMLImageElement]> | null = null;
+type Art = { tiles: HTMLImageElement; wolf: HTMLImageElement; buildings: HTMLImageElement; fountain: HTMLImageElement; shade: HTMLCanvasElement };
+let art: Promise<Art> | null = null;
 const loadArt = () => {
-  art ??= Promise.all([img("world/tiles.png"), img("world/wolf.png")]);
+  art ??= Promise.all(["tiles", "wolf", "buildings", "fountain"].map((n) => img(`world/${n}.png`))).then(([tiles, wolf, buildings, fountain]) => ({
+    tiles,
+    wolf,
+    buildings,
+    fountain,
+    shade: silhouette(buildings, fountain),
+  }));
   art.catch(() => (art = null));
   return art;
 };
+
+/** Soft black copies of the buildings (and the fountain after them) for cast shadows. */
+function silhouette(buildings: HTMLImageElement, fountain: HTMLImageElement): HTMLCanvasElement {
+  const c = h("canvas", { width: buildings.width + BUILDING_PX, height: buildings.height });
+  const g = c.getContext("2d")!;
+  g.filter = "blur(1px)"; // ignored where unsupported: hard-edged shadows are fine too
+  g.drawImage(buildings, 0, 0);
+  g.drawImage(fountain, buildings.width, 0);
+  g.filter = "none";
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = "#1a0f1f";
+  g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+
+const LAMPS = Object.fromEntries(
+  Object.values(MAPS).map((m) => [m.id, m.rows.flatMap((r, y) => [...r].flatMap((_, x) => (tileAt(m, x, y) === "lamp" ? [[x, y] as [number, number]] : [])))]),
+) as Record<keyof typeof MAPS, [number, number][]>;
+
+/** Per-map sun-shaft colour; the matching colour grade is .world-shade in astra.css. */
+const MOOD = {
+  oakheart_village: { rays: "255,210,140" },
+  whispering_forest: { rays: "220,255,200" },
+} as const;
 
 export function explore(start: SaveData, toTitle: (notice?: string) => void, notice = "") {
   let save = start;
@@ -79,6 +112,7 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   // ---------- DOM ----------
   const canvas = h("canvas", { class: "world-canvas", aria: { hidden: "true" } });
   const ctx = canvas.getContext("2d")!;
+  const glowLayer = h("canvas", { class: "world-glow", aria: { hidden: "true" } });
   const status = h("div", { class: "hud-stats" });
   const quest = h("p", { class: "hud-quest" });
   const toastEl = h("p", { class: "toast", role: "status" });
@@ -116,6 +150,10 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     "main",
     { class: "screen world", aria: { label: map().name } },
     canvas,
+    glowLayer,
+    h("div", { class: "world-shade", aria: { hidden: "true" } }),
+    h("div", { class: "dof top", aria: { hidden: "true" } }),
+    h("div", { class: "dof bottom", aria: { hidden: "true" } }),
     h(
       "header",
       { class: "hud" },
@@ -318,9 +356,9 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   }
   addEventListener("resize", resize, on);
 
-  let sheets: { hero: HTMLCanvasElement; elaine: HTMLCanvasElement; tiles: HTMLImageElement; wolf: HTMLImageElement } | null = null;
+  let sheets: (Art & { hero: HTMLCanvasElement; elaine: HTMLCanvasElement }) | null = null;
   Promise.all([composite(save.hero.look, save.hero.classId), composite(ELAINE, "ranger"), loadArt()])
-    .then(([hero, elaine, [tiles, wolf]]) => (sheets = { hero, elaine, tiles, wolf }))
+    .then(([hero, elaine, a]) => (sheets = { ...a, hero, elaine }))
     .catch(() => toast("โหลดภาพแผนที่ไม่สำเร็จ"));
 
   function frame(now: number) {
@@ -330,6 +368,35 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (!move && held && !busy) tryMove(held);
     draw(now);
     requestAnimationFrame(frame);
+  }
+
+  // Tiles and cast shadows never change, so each map's ground is painted once.
+  const grounds = new Map<string, HTMLCanvasElement>();
+  function groundOf(id: keyof typeof MAPS): HTMLCanvasElement {
+    const cached = grounds.get(id);
+    if (cached) return cached;
+    const m = MAPS[id];
+    const c = h("canvas", { width: m.rows[0].length * TILE, height: m.rows.length * TILE });
+    const g = c.getContext("2d")!;
+    for (let y = 0; y < m.rows.length; y++)
+      for (let x = 0; x < m.rows[0].length; x++) g.drawImage(sheets!.tiles, tileIndex(tileAt(m, x, y)!) * TILE, 0, TILE, TILE, x * TILE, y * TILE, TILE, TILE);
+    // Cast shadows fall to the lower right (sun from the upper left).
+    g.globalAlpha = 0.3;
+    g.fillStyle = "#1a0f1f";
+    for (let y = 0; y < m.rows.length; y++)
+      for (let x = 0; x < m.rows[0].length; x++)
+        if (["tree", "forest_tree", "bush", "planter"].includes(tileAt(m, x, y)!)) {
+          g.beginPath();
+          g.ellipse(x * TILE + 11, y * TILE + 14, 7, 3, 0, 0, Math.PI * 2);
+          g.fill();
+        }
+    for (const p of m.props ?? []) {
+      const { cell } = PROP_ART[p.art];
+      const [sx, sy, sw, sh] = cell < 0 ? [sheets!.buildings.width, 0, 48, 48] : [(cell % 10) * BUILDING_PX, Math.floor(cell / 10) * BUILDING_PX, BUILDING_PX, BUILDING_PX];
+      g.drawImage(sheets!.shade, sx, sy, sw, sh, p.x * TILE + 6, p.y * TILE + 4, sw, sh);
+    }
+    grounds.set(id, c);
+    return c;
   }
 
   function draw(now: number) {
@@ -346,17 +413,25 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     ctx.fillStyle = "#0b1426";
     ctx.fillRect(0, 0, vw, vh);
     const tile = (t: number, x: number, y: number) => ctx.drawImage(sheets!.tiles, t * TILE, 0, TILE, TILE, x * TILE - cx, y * TILE - cy, TILE, TILE);
-    const x0 = Math.max(0, Math.floor(cx / TILE));
-    const y0 = Math.max(0, Math.floor(cy / TILE));
-    for (let y = y0; y < Math.min(m.rows.length, y0 + vh / TILE + 2); y++)
-      for (let x = x0; x < Math.min(m.rows[0].length, x0 + vw / TILE + 2); x++) tile(tileIndex(tileAt(m, x, y)!), x, y);
+    ctx.drawImage(groundOf(m.id), -cx, -cy);
+    const lamps = LAMPS[m.id].filter(([x, y]) => (x + 3) * TILE > cx && (x - 2) * TILE < cx + vw && (y + 3) * TILE > cy && (y - 2) * TILE < cy + vh);
 
     const forest = m.id === "whispering_forest";
     const moving = !!move || (!!held && !busy);
     const anim = still() ? 0 : now;
     const sprites: { y: number; draw: () => void }[] = [];
+    for (const p of m.props ?? []) {
+      const { cell, foot } = PROP_ART[p.art];
+      sprites.push({
+        y: p.y + foot[3] + 0.5, // drawn after anyone standing on its roof rows, before anyone in front
+        draw: () =>
+          cell < 0
+            ? ctx.drawImage(sheets!.fountain, p.x * TILE - cx, p.y * TILE - cy)
+            : ctx.drawImage(sheets!.buildings, (cell % 10) * BUILDING_PX, Math.floor(cell / 10) * BUILDING_PX, BUILDING_PX, BUILDING_PX, p.x * TILE - cx, p.y * TILE - cy, BUILDING_PX, BUILDING_PX),
+      });
+    }
     for (const e of liveEntities(m, save)) {
-      if (e.kind === "crystal") tile(tileIndex("crystal"), e.x, e.y);
+      if (e.kind === "crystal") tile(tileIndex(tileAt(m, e.x, e.y)?.startsWith("plaza") ? "plaza_crystal" : "crystal"), e.x, e.y);
       if (e.kind === "sign") tile(tileIndex("sign"), e.x, e.y);
       if (e.kind === "chest") {
         const open = save.progress.claimed.includes(e.id);
@@ -376,6 +451,8 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     });
     sprites.sort((a, b) => a.y - b.y).forEach((s) => s.draw());
 
+    if (settings.lighting) light(now, m.id, cx, cy, lamps, hx - cx, hy - cy);
+
     if (target && !busy) {
       // "!" bubble above whatever the Interact button would act on.
       const bx = (target.x + 0.5) * TILE - cx;
@@ -390,10 +467,79 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     }
   }
 
+  // HD-2D style light over the finished pixel art, composited by the browser rather than in
+  // the canvas so phones stay fast: a CSS multiply layer (.world-shade: sky-to-ground grade and
+  // vignette) and this art-resolution screen layer stretched smoothly over the map (lamp,
+  // crystal and fountain glow, drifting sun shafts, dust). Purely cosmetic; reduced motion freezes it.
+  function light(now: number, id: keyof typeof MOOD, cx: number, cy: number, lamps: [number, number][], hx: number, hy: number) {
+    const mood = MOOD[id];
+    const t = still() ? 0 : now / 1000;
+    if (glowLayer.width !== vw || glowLayer.height !== vh) {
+      glowLayer.width = vw;
+      glowLayer.height = vh;
+    }
+    glowLayer.style.width = canvas.style.width;
+    glowLayer.style.height = canvas.style.height;
+    const g = glowLayer.getContext("2d")!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, vw, vh);
+    g.globalCompositeOperation = "lighter";
+    const glow = (x: number, y: number, r: number, rgb: string, a: number) => {
+      const gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, `rgba(${rgb},${a})`);
+      gr.addColorStop(1, `rgba(${rgb},0)`);
+      g.fillStyle = gr;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    for (const [x, y] of lamps) {
+      const flicker = 0.85 + 0.15 * Math.sin(t * 9 + x * 3.1 + y) * Math.sin(t * 5.3 + y);
+      glow((x + 0.5) * TILE - cx, y * TILE - cy + 3, 34, "255,170,80", 0.55 * flicker);
+      glow((x + 0.5) * TILE - cx, y * TILE - cy + 3, 9, "255,240,190", 0.8 * flicker);
+    }
+    for (const e of liveEntities(map(), save))
+      if (e.kind === "crystal") glow((e.x + 0.5) * TILE - cx, e.y * TILE - cy + 6, 26, "120,200,255", 0.45 + 0.1 * Math.sin(t * 2));
+    for (const p of map().props ?? [])
+      if (p.art === "fountain") glow(p.x * TILE - cx + 24, p.y * TILE - cy + 26, 30, "170,230,255", 0.3 + 0.06 * Math.sin(t * 3));
+    glow(hx, hy - 12, 40, "255,230,190", 0.12); // soft key light on the hero
+
+    // Sun shafts: wide diagonal bands sliding slowly across the view.
+    g.translate(vw / 2, vh / 2);
+    g.rotate(-0.6);
+    const span = Math.hypot(vw, vh);
+    for (let i = 0; i < 4; i++) {
+      const x = (((i * 0.31 + t * 0.006) % 1.2) - 0.6) * span;
+      const w = span * (0.05 + 0.03 * (i % 2));
+      const band = g.createLinearGradient(x - w, 0, x + w, 0);
+      band.addColorStop(0, `rgba(${mood.rays},0)`);
+      band.addColorStop(0.5, `rgba(${mood.rays},${0.17 + 0.05 * Math.sin(t * 0.7 + i)})`);
+      band.addColorStop(1, `rgba(${mood.rays},0)`);
+      g.fillStyle = band;
+      g.fillRect(x - w, -span, w * 2, span * 2);
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Dust motes drifting on the breeze; they wrap around the view.
+    g.fillStyle = `rgb(${mood.rays})`;
+    for (let i = 0; i < 28; i++) {
+      const a = 0.25 + 0.3 * Math.sin(t * 1.3 + i);
+      if (a <= 0.05) continue;
+      const x = (i * 53.7 + t * (3 + (i % 5)) - cx * 0.2) % vw;
+      const y = (i * 31.3 + Math.sin(t * 0.8 + i) * 6 - cy * 0.2) % vh;
+      g.globalAlpha = a;
+      g.fillRect(Math.round(x < 0 ? x + vw : x), Math.round(y < 0 ? y + vh : y), 1, 1);
+    }
+    g.globalAlpha = 1;
+
+  }
+
   function person(sheet: HTMLCanvasElement, a: keyof typeof ANIMS, f: number, fx: number, fy: number, flip: boolean) {
     const { row, frames } = ANIMS[a];
     ctx.save();
     ctx.translate(Math.round(fx), Math.round(fy));
+    ctx.fillStyle = "rgba(26,15,31,0.35)";
+    ctx.beginPath();
+    ctx.ellipse(2, -2, 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
     if (flip) ctx.scale(-1, 1);
     ctx.drawImage(sheet, (f % frames) * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H, -HERO_FOOT.x, -HERO_FOOT.y - 2, FRAME_W, FRAME_H);
     ctx.restore();

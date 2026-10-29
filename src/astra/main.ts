@@ -123,6 +123,8 @@ function settingsPanel(back: () => void) {
           /* session-only settings */
         }
         document.documentElement.classList.toggle("reduced", settings.reducedMotion);
+document.documentElement.classList.toggle("no-fx", !settings.lighting);
+        document.documentElement.classList.toggle("no-fx", !settings.lighting);
       },
     });
     return h("label", { class: "toggle" }, input, h("span", {}, h("b", {}, label), h("small", {}, hint)));
@@ -137,6 +139,7 @@ function settingsPanel(back: () => void) {
         h("h2", { id: "set-title" }, "Settings"),
         toggle("autoTiming", "Auto timing", "จังหวะ Perfect Strike/Guard ถือเป็น Normal โดยอัตโนมัติ"),
         toggle("reducedMotion", "ลดการเคลื่อนไหว", "ปิดแอนิเมชันตัวละครและเอฟเฟกต์"),
+        toggle("lighting", "แสงเงา HD-2D", "แสงตะเกียง ลำแสงแดด และเบลอระยะชัด ปิดได้ถ้าเครื่องกระตุก"),
         button("กลับ", back, { class: "primary" }),
       ),
     ),

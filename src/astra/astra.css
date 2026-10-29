@@ -463,6 +463,44 @@ footer.row {
   top: 0;
   image-rendering: pixelated;
 }
+.no-fx .world-glow,
+.no-fx .world-shade,
+.no-fx .dof {
+  display: none;
+}
+.world-glow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+/* Colour grade: cool sky at the top, warm golden ground below, darker edges. */
+.world-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background:
+    radial-gradient(ellipse at center, transparent 45%, rgb(15 8 25 / 0.62) 100%),
+    linear-gradient(#c4acd6, #ffe7c6 50%, #e2ad78);
+}
+.world[data-map="whispering_forest"] .world-shade {
+  background:
+    radial-gradient(ellipse at center, transparent 45%, rgb(15 8 25 / 0.6) 100%),
+    linear-gradient(#9fc4bd, #e8f0d2 50%, #b9cf9a);
+}
+/* Tilt-shift depth of field over the top and bottom of the map, as in HD-2D. */
+.dof {
+  position: absolute;
+  inset-inline: 0;
+  height: 18%;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(1.4px);
+  backdrop-filter: blur(1.4px);
+}
+.dof.top { top: 0; mask-image: linear-gradient(#000, transparent); -webkit-mask-image: linear-gradient(#000, transparent); }
+.dof.bottom { bottom: 0; mask-image: linear-gradient(transparent, #000); -webkit-mask-image: linear-gradient(transparent, #000); }
 .hud {
   position: absolute;
   inset: 0.4em 0.4em auto;

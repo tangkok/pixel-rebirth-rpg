@@ -405,6 +405,151 @@ def battle_forest() -> Image.Image:
     return img
 
 
+
+# ---------- town (separate seed so the tiles above stay byte-identical) ----------
+r2 = random.Random(11)
+CB0, CB1, CB2, CB3 = "#3b332d", "#6a5d50", "#857765", "#a89a84"  # cobble gap, stone, light, highlight
+
+
+def cobble(worn=False):
+    img = tile()
+    fill(img, CB0)
+    for row in range(4):
+        y0 = row * 4
+        x = -r2.randrange(0, 4) if row % 2 else 0
+        while x < T:
+            w = r2.randrange(4, 7)
+            body = r2.choice([CB1, CB1, CB2]) if not worn else r2.choice([CB1, "#5f6b4a", CB2])
+            for xx in range(x, x + w - 1):
+                for yy in range(y0, y0 + 3):
+                    px(img, xx, yy, body)
+            px(img, x, y0, CB3)
+            px(img, x + 1, y0, CB3)
+            x += w
+    if worn:
+        for _ in range(5):
+            px(img, r2.randrange(T), r2.randrange(T), "#4f7a3a")  # moss
+    return img
+
+
+def plaza(worn=False):
+    """Warm flagstones laid in staggered courses; the worn variant adds cracks and moss."""
+    img = tile()
+    fill(img, "#5e5246")
+    tones = ["#9a8b76", "#a6977f", "#8f816d", "#b0a189"]
+    for row in range(2):
+        y0 = row * 8
+        x = -4 if row % 2 else 0
+        while x < T:
+            w = 8
+            body = r2.choice(tones)
+            for xx in range(x, x + w - 1):
+                for yy in range(y0, y0 + 7):
+                    px(img, xx, yy, body)
+            for xx in range(x, x + w - 1):
+                px(img, xx, y0, "#c2b49b")  # lit top edge
+                px(img, xx, y0 + 6, "#7b6e5c")  # shaded bottom edge
+            x += w
+    for _ in range(10):
+        px(img, r2.randrange(T), r2.randrange(T), "#7f7262")
+    if worn:
+        x, y = r2.randrange(2, 12), r2.randrange(2, 12)
+        for k in range(5):
+            px(img, x + k, y + (k % 2), "#5e5246")  # crack
+        for _ in range(6):
+            px(img, r2.randrange(T), r2.randrange(T), "#5f7a43")
+    return img
+
+
+def lamp(base):
+    img = base.copy()
+    for y in range(13, 16):  # foot
+        for x in range(5, 11):
+            px(img, x, y, INK if y == 15 or x in (5, 10) else STONE1)
+    for y in range(5, 13):  # pole
+        px(img, 7, y, STONE1)
+        px(img, 8, y, INK)
+    for y in range(0, 6):  # lantern
+        for x in range(5, 11):
+            edge = x in (5, 10) or y in (0, 5)
+            px(img, x, y, INK if edge else ("#fff6d0" if (x, y) == (7, 2) else LIGHT))
+    px(img, 6, 0, "#2b2b34")
+    px(img, 9, 0, "#2b2b34")
+    return img
+
+
+def barrel(base):
+    img = base.copy()
+    for y in range(3, 16):
+        for x in range(3, 13):
+            bulge = 1 if 5 <= y <= 12 else 0
+            if x < 4 - bulge or x > 11 + bulge:
+                continue
+            c = WOOD3 if x < 7 else WOOD2
+            if y in (5, 11):
+                c = STONE1
+            if x in (4 - bulge, 11 + bulge) or y in (3, 15):
+                c = INK
+            px(img, x, y, c)
+    for x in range(5, 11):
+        px(img, x, 4, D3)
+    return img
+
+
+def crate(base):
+    img = base.copy()
+    for y in range(4, 16):
+        for x in range(2, 14):
+            c = WOOD3
+            if x in (2, 13) or y in (4, 15):
+                c = INK
+            elif x == y - 2 or x in (3, 12) or y in (5, 14):
+                c = WOOD2
+            px(img, x, y, c)
+    return img
+
+
+def planter(base):
+    img = base.copy()
+    top = tile()
+    canopy(top, 8, 7, 5, LEAF1, LEAF2, LEAF3)
+    img.alpha_composite(top)
+    for c in ("#f08fb0", "#f2e86d", "#ffffff", "#c0524e"):
+        x, y = r2.randrange(4, 12), r2.randrange(4, 9)
+        px(img, x, y, c)
+    for y in range(10, 16):
+        for x in range(1, 15):
+            px(img, x, y, INK if x in (1, 14) or y in (10, 15) else (WOOD3 if y < 13 else WOOD2))
+    return img
+
+
+def fountain() -> Image.Image:
+    """48x48 stone fountain for the town square, drawn top-down to sit on plaza tiles."""
+    img = Image.new("RGBA", (48, 48))
+    for y in range(48):
+        for x in range(48):
+            d = ((x - 23.5) / 22) ** 2 + ((y - 26) / 20) ** 2
+            if d <= 0.62:
+                px(img, x, y, W2 if (x * 7 + y * 3) % 11 else W3)  # basin water
+            elif d <= 0.72:
+                px(img, x, y, STONE3)  # inner rim highlight
+            elif d <= 0.92:
+                px(img, x, y, STONE2 if y < 30 else STONE1)
+            elif d <= 1.0:
+                px(img, x, y, INK)
+    for y in range(8, 30):  # centre column
+        for x in range(21, 27):
+            px(img, x, y, INK if x in (21, 26) else (STONE3 if x < 24 else STONE2))
+    for y in range(4, 10):  # top bowl
+        for x in range(16, 32):
+            if abs(x - 23.5) <= 7 - (9 - y) * 0.5:
+                px(img, x, y, INK if y in (4, 9) else (W3 if y < 6 else STONE2))
+    for x, y in ((18, 12), (29, 12), (16, 17), (31, 17), (20, 22), (27, 22)):  # falling water
+        for k in range(5):
+            px(img, x, y + k, W3 if k % 2 == 0 else "#ffffff")
+    return img
+
+
 TILES = [
     ("grass", lambda: grass()),
     ("grass_tuft", lambda: grass(True)),
@@ -429,17 +574,33 @@ TILES = [
     ("forest_chest", lambda: chest(forest_floor(), False)),
     ("forest_chest_open", lambda: chest(forest_floor(), True)),
 ]
+# Appended after the originals so earlier tile indices (and their pixels) never move.
+TOWN_TILES = [
+    ("cobble", lambda: cobble()),
+    ("cobble_worn", lambda: cobble(True)),
+    ("plaza", lambda: plaza()),
+    ("lamp", lambda: lamp(cobble())),
+    ("barrel", lambda: barrel(cobble())),
+    ("crate", lambda: crate(cobble())),
+    ("planter", lambda: planter(cobble())),
+    ("plaza_worn", lambda: plaza(True)),
+    ("plaza_crystal", lambda: crystal(plaza())),
+]
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    sheet = Image.new("RGBA", (T * len(TILES), T))
-    for i, (_, make) in enumerate(TILES):
-        sheet.paste(make(), (T * i, 0))
+    old = [make() for _, make in TILES]  # draw these first: they share the original seed
+    wolf, battle = wolf_frames(), battle_forest()
+    every = old + [make() for _, make in TOWN_TILES]
+    sheet = Image.new("RGBA", (T * len(every), T))
+    for i, img in enumerate(every):
+        sheet.paste(img, (T * i, 0))
     sheet.save(OUT / "tiles.png", optimize=True)
-    wolf_frames().save(OUT / "wolf.png", optimize=True)
-    battle_forest().save(OUT / "battle_forest.png", optimize=True)
-    print(" ".join(name for name, _ in TILES))
+    wolf.save(OUT / "wolf.png", optimize=True)
+    battle.save(OUT / "battle_forest.png", optimize=True)
+    fountain().save(OUT / "fountain.png", optimize=True)
+    print(" ".join(name for name, _ in TILES + TOWN_TILES))
 
 
 if __name__ == "__main__":

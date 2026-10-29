@@ -39,7 +39,10 @@ describe("maps", () => {
   it("blocks trees and water, and defeated enemies stop blocking", () => {
     const v = MAPS.oakheart_village;
     expect(walkable(v, fresh(), 0, 0)).toBe(false); // tree
-    expect(walkable(v, fresh(), 12, 11)).toBe(false); // pond
+    expect(walkable(v, fresh(), 37, 22)).toBe(false); // pond
+    expect(walkable(v, fresh(), 19, 4)).toBe(false); // town hall walls
+    expect(walkable(v, fresh(), 19, 2)).toBe(true); // behind its roof
+    expect(walkable(v, fresh(), 19, 13)).toBe(false); // fountain
     const f = MAPS.whispering_forest;
     const s = inForest(fresh());
     expect(entityAt(f, s, 8, 7)?.id).toBe("forest_wolf_1");
@@ -49,8 +52,8 @@ describe("maps", () => {
   });
   it("interacts with the faced neighbour first", () => {
     const v = MAPS.oakheart_village;
-    expect(interactTarget(v, fresh(), 13, 7, "left")?.id).toBe("npc_scout_elaine");
-    expect(interactTarget(v, fresh(), 13, 8, "right")?.id).toBe("oakheart_square"); // crystal at 14,8
+    expect(interactTarget(v, fresh(), 23, 11, "left")?.id).toBe("npc_scout_elaine");
+    expect(interactTarget(v, fresh(), 15, 16, "right")?.id).toBe("oakheart_square"); // crystal at 16,16
     expect(interactTarget(v, fresh(), 5, 5, "up")).toBeNull();
   });
 });
@@ -110,7 +113,7 @@ describe("chests and saves", () => {
     };
     const s = parseSave(JSON.stringify(v1))!;
     expect(s.version).toBe(2);
-    expect(s.progress).toMatchObject({ map: "oakheart_village", x: 14, y: 9, quest: { state: "AVAILABLE", kills: [] } });
+    expect(s.progress).toMatchObject({ map: "oakheart_village", x: 16, y: 17, quest: { state: "AVAILABLE", kills: [] } });
   });
   const bad = (f: (s: SaveData) => unknown) => JSON.stringify(f(fresh()));
   it.each([

@@ -62,8 +62,10 @@ export interface SaveData {
 export interface Settings {
   autoTiming: boolean;
   reducedMotion: boolean;
+  /** HD-2D light, colour grade and depth-of-field blur on the map. */
+  lighting: boolean;
 }
-export const DEFAULT_SETTINGS: Settings = { autoTiming: false, reducedMotion: false };
+export const DEFAULT_SETTINGS: Settings = { autoTiming: false, reducedMotion: false, lighting: true };
 
 export function newSave(
   name: string,
@@ -204,6 +206,7 @@ export function parseSettings(raw: string | null): Settings {
       return {
         autoTiming: d.autoTiming === true,
         reducedMotion: d.reducedMotion === true,
+        lighting: d.lighting !== false,
       };
   } catch {
     /* fall through to defaults */
