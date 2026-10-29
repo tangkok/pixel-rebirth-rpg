@@ -153,3 +153,12 @@ Vite ใช้ Asset URL แบบ relative จึงรองรับ path `/p
 ## แนวทางจากไฟล์แนบ
 
 นำคู่มือ [game-ui-ux](docs/gamedev-skills/game-ui-ux/SKILL.md), [game-feel](docs/gamedev-skills/game-feel/SKILL.md) และ [rpg](docs/gamedev-skills/rpg/SKILL.md) จาก ZIP ที่ผู้ใช้แนบมาปรับใช้กับ Phaser ดูรายละเอียดที่ [บันทึกการประยุกต์ใช้](docs/gamedev-skills/README.md) เก็บสำเนาคู่มือพร้อม LICENSE และ NOTICE เดิมไว้ใน repository โดยไม่รันสคริปต์ติดตั้งจากไฟล์แนบ
+
+## Echoes of Astra (หน้าแยก `/astra/`)
+
+เกมใหม่ตาม GDD v1.8 อยู่ที่ `astra/index.html` + `src/astra/` และเผยแพร่คู่กับ Pixel Rebirth ที่ `/astra/` โดยไม่แตะเกมเดิม ขั้นนี้มี Boot → Title → Character Creation (ชื่อ, เพศ, 5 อาชีพ, สุ่มพรสวรรค์ 3 ครั้งเลือก 1 จาก 20) → เซฟ/Continue ช่องเดียวพร้อมสำรองและตรวจข้อมูล
+
+- ค่าที่ GDD ยังไม่กำหนดติดป้าย `PLACEHOLDER` ใน `src/astra/data.ts` และ `src/astra/save.ts`
+- ภาพฮีโร่ประกอบจาก Heroes99 v1.2 (ผู้ใช้ซื้อ license แล้ว) ด้วย `python3 -I scripts/compose-heroes.py <Heroes99_v1.2> public/astra/heroes` เก็บเฉพาะ sheet ที่ประกอบแล้ว ไม่เก็บไฟล์ต้นฉบับ
+- Heroes99 ไม่มีธนูและกระบอง Ranger และ Cleric จึงยังไม่ถืออาวุธ และ sprite เป็นมุมข้างอย่างเดียว ยังไม่มี 4 ทิศสำหรับ top-down
+- ทดสอบ: `npm test` (tests/astra.test.ts) และ `npm run test:e2e` (tests/browser/astra.spec.ts รวมการตรวจว่าไม่มี scroll)
