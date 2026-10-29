@@ -186,6 +186,19 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   wolf_pelt: 0,
 }; // PLACEHOLDER
 
+/**
+ * PLACEHOLDER journey difficulties (owner reference screenshot): percent multipliers on enemy HP
+ * and ATK/MAG, the Perfect/Good guard window, and EXP/Gold rewards. Torment opens after 3 cleared journeys.
+ */
+export const DIFFICULTIES = {
+  normal: { name: "ปกติ", crowns: 1, hp: 100, power: 100, guard: 100, reward: 100, needWins: 0 },
+  hard: { name: "ยาก", crowns: 2, hp: 125, power: 118, guard: 88, reward: 180, needWins: 0 },
+  nightmare: { name: "ฝันร้าย", crowns: 3, hp: 140, power: 125, guard: 78, reward: 280, needWins: 0 },
+  torment: { name: "ทรมาน I", crowns: 4, hp: 300, power: 270, guard: 70, reward: 360, needWins: 3 },
+} as const;
+export type DifficultyId = keyof typeof DIFFICULTIES;
+export const DIFFICULTY_IDS = Object.keys(DIFFICULTIES) as DifficultyId[];
+
 /** PLACEHOLDER: total EXP needed to reach each level (GDD: levels 1–3). */
 export const LEVEL_EXP = [0, 30, 80];
 export const MAX_LEVEL = LEVEL_EXP.length;

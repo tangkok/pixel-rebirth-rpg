@@ -3,7 +3,7 @@
 // against a snapshot and returns a new state plus an immutable event log. The screen only
 // captures one timing result per action and plays the log back, so skip, resize or a
 // double tap can never change results.
-import { CLASSES, ENEMIES, ITEMS, talentById, type ClassId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, talentById, type ClassId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
 import { effectiveStats } from "./hero";
 
 export type Command = { type: "attack" } | { type: "skill" } | { type: "defend" } | { type: "burst" } | { type: "item"; item: ItemId };
@@ -25,8 +25,11 @@ export const TIMING = {
   // Owner change to COMBAT_SPEC §4 (was ×0.40): a Perfect Guard blocks the hit completely.
   guard: { perfect: [0, 15], good: [0.75, 10], normal: [1, 3] },
 } as const;
-export const judge = (offsetMs: number): Timing =>
-  Math.abs(offsetMs) <= TIMING.windowMs.perfect ? "perfect" : Math.abs(offsetMs) <= TIMING.windowMs.good ? "good" : "normal";
+/** `windowPct` narrows both windows (harder journeys shrink the guard window). */
+export const judge = (offsetMs: number, windowPct = 100): Timing => {
+  const off = (Math.abs(offsetMs) * 100) / windowPct;
+  return off <= TIMING.windowMs.perfect ? "perfect" : off <= TIMING.windowMs.good ? "good" : "normal";
+};
 
 /** Astra Burst per class (§5): multiplier on the normal-attack base. */
 export const BURSTS: Record<ClassId, { mult: number; kind: "physical" | "magic" }> = {
@@ -57,6 +60,7 @@ export interface BattleState {
   classId: ClassId;
   talentId: string;
   level: number;
+  diff: DifficultyId;
   hero: Fighter & { astra: number; revived: boolean };
   foe: Fighter & {
     actions: number;
@@ -102,7 +106,12 @@ export type BattleEvent =
   | { type: "end"; result: "win" | "lose" };
 
 export const heroStats = (b: Pick<BattleState, "classId" | "talentId" | "level">): Stats => effectiveStats(b.classId, b.talentId, b.level);
-export const foeStats = (b: Pick<BattleState, "enemy">): Stats => ENEMIES[b.enemy].stats;
+export const foeStats = (b: Pick<BattleState, "enemy" | "diff">): Stats => {
+  const d = DIFFICULTIES[b.diff];
+  const s = ENEMIES[b.enemy].stats;
+  const pct = (v: number, p: number) => Math.max(1, Math.floor((v * p) / 100));
+  return { ...s, maxHp: pct(s.maxHp, d.hp), atk: pct(s.atk, d.power), mag: pct(s.mag, d.power) };
+};
 const has = (b: Pick<BattleState, "talentId">, id: string) => b.talentId === id;
 const isBoss = (b: BattleState) => "boss" in ENEMIES[b.enemy];
 
@@ -128,14 +137,16 @@ export function startBattle(
   items: Record<ItemId, number>,
   encounterId: string,
   enemy: EnemyId,
+  diff: DifficultyId = "normal",
 ): BattleState {
-  const max = foeStats({ enemy }).maxHp;
+  const max = foeStats({ enemy, diff }).maxHp;
   const b: BattleState = {
     encounterId,
     enemy,
     classId: hero.classId,
     talentId: hero.talentId,
     level: hero.level ?? 1,
+    diff,
     hero: { hp: hero.hp, mp: hero.mp, defending: false, astra: 0, revived: false },
     foe: { hp: max, mp: 0, defending: false, actions: 0, aura: null, auraAge: 0, shock: 0, weak: false, frozen: false, freezeImmune: 0 },
     items: { ...items },

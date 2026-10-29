@@ -1,7 +1,7 @@
 // Side-view duel screen (BATTLE_VISUAL_DIRECTION). Captures one timing result per action,
 // commits it through battle.ts, then plays the returned event log; skip and resize only
 // change what is drawn.
-import { CLASSES, ENEMIES, ITEMS, type Element, type ItemId } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, type Element, type ItemId } from "./data";
 import {
   act,
   BURSTS,
@@ -25,7 +25,7 @@ import { ANIMS, FRAME_H, FRAME_W, type Anim } from "./looks";
 import { heroFrame, heroMove, impactAt, keyAt, MOVES, moveLength, releaseAt, WOLF_POSES, type Key, type MoveKind, type WolfPose } from "./moves";
 import type { SaveData } from "./save";
 import { button, composite, crisp, h, settings, show, still } from "./ui";
-import { expFor } from "./route";
+import { rewardOf } from "./route";
 
 const STEP_MS = 520;
 /** The shrinking ring meets the target this long after the cue appears; input closes LATE_MS after. */
@@ -46,7 +46,7 @@ export function duel(
   place: string,
   done: (b: BattleState) => void,
 ) {
-  let b = startBattle(save.hero, save.items, encounterId, enemy);
+  let b = startBattle(save.hero, save.items, encounterId, enemy, save.progress.diff);
   let seq = 0;
   let playing = false;
   let skipTo: (() => void) | null = null;
@@ -374,7 +374,7 @@ export function duel(
   }
   function result() {
     const win = b.over === "win";
-    log.textContent = win ? `ชนะ! ได้รับ ${expFor(enemy, b.talentId)} EXP` : "พ่ายแพ้… การเดินทางต้องเริ่มใหม่";
+    log.textContent = win ? `ชนะ! ได้รับ ${rewardOf(save, encounterId).exp} EXP` : "พ่ายแพ้… การเดินทางต้องเริ่มใหม่";
     cmds.replaceChildren(button(win ? "กลับสู่เส้นทาง" : "เริ่มเส้นทางใหม่", () => done(b), { class: "primary", autofocus: true }));
     cmds.querySelector("button")?.focus({ preventScroll: true });
   }
@@ -408,7 +408,7 @@ export function duel(
       };
       const tap = (e: Event) => {
         e.preventDefault();
-        end(judge(performance.now() - target));
+        end(judge(performance.now() - target, kind === "guard" ? DIFFICULTIES[b.diff].guard : 100));
       };
       const key = (e: KeyboardEvent) => {
         if (e.repeat || (e.key !== " " && e.key !== "Enter")) return;

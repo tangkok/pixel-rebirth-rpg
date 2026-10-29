@@ -1,7 +1,7 @@
 // The journey: a branching route of nodes (battle, chest, rest, Kael, boss) chosen one at a
 // time, in the style of a route-choice RPG. Pure functions over SaveData so a replayed choice
 // or victory never pays twice; journey.ts only draws and forwards taps.
-import { ENEMIES, ITEMS, LEVEL_EXP, type EnemyId, type ItemId } from "./data";
+import { DIFFICULTIES, ENEMIES, ITEMS, LEVEL_EXP, type DifficultyId, type EnemyId, type ItemId } from "./data";
 import { effectiveStats } from "./hero";
 import type { SaveData } from "./save";
 
@@ -91,23 +91,56 @@ export function visit(s: SaveData, id: string): SaveData | null {
   return n;
 }
 
+/** EXP and Gold of one won fight on `id`, after the journey's difficulty reward multiplier. */
+export function rewardOf(s: SaveData, id: string): { exp: number; gold: number; item: ItemId | null } {
+  const enemy = ROUTE[id].enemy!;
+  const r = DIFFICULTIES[s.progress.diff].reward;
+  const loot = lootOf(enemy, id);
+  return { exp: Math.floor((expFor(enemy, s.hero.talentId) * r) / 100), gold: Math.floor(((loot?.gold ?? 0) * r) / 100), item: loot?.item ?? null };
+}
+
 /** Applies a won fight on a reachable battle/boss node. Replaying it changes nothing. */
 export function recordVictory(s: SaveData, id: string): SaveData {
   const node = ROUTE[id];
   if (!node?.enemy || !choices(s).includes(id)) return s;
+  const got = rewardOf(s, id);
   const n = clone(s);
   n.progress.path.push(id);
-  n.hero.exp = Math.min(n.hero.exp + expFor(node.enemy, n.hero.talentId), 1e7);
+  n.hero.exp = Math.min(n.hero.exp + got.exp, 1e7);
   const was = n.hero.level;
   n.hero.level = levelFor(n.hero.exp);
   if (n.hero.level > was) heal(n); // PLACEHOLDER: a level-up fully restores HP/MP (no rule in the GDD yet)
-  const loot = lootOf(node.enemy, id);
-  if (loot) {
-    n.gold = Math.min(n.gold + loot.gold, GOLD_CAP);
-    n.items[loot.item] = Math.min(n.items[loot.item] + 1, ITEM_CAP);
-  }
+  n.gold = Math.min(n.gold + got.gold, GOLD_CAP);
+  if (got.item) n.items[got.item] = Math.min(n.items[got.item] + 1, ITEM_CAP);
   if (node.kind === "boss") n.progress.wins += 1;
   return n;
+}
+
+/** Sets the difficulty before the first step; locked tiers and mid-journey changes are refused. */
+export function startRun(s: SaveData, diff: DifficultyId): SaveData | null {
+  if (s.progress.path.length || !(diff in DIFFICULTIES) || s.progress.wins < DIFFICULTIES[diff].needWins) return null;
+  return { ...s, progress: { ...s.progress, diff } };
+}
+
+/** What this journey has earned so far, derived from the path (nothing extra to save). */
+export function runSummary(s: SaveData) {
+  let fights = 0;
+  let gold = 0;
+  let exp = 0;
+  const found: Partial<Record<ItemId, number>> = {};
+  const add = (it: ItemId, q: number) => (found[it] = (found[it] ?? 0) + q);
+  s.progress.path.forEach((id, i) => {
+    const n = ROUTE[id];
+    if (n.enemy) {
+      const r = rewardOf({ ...s, progress: { ...s.progress, path: s.progress.path.slice(0, i) } }, id);
+      fights += 1;
+      gold += r.gold;
+      exp += r.exp;
+      if (r.item) add(r.item, 1);
+    }
+    for (const [it, q] of Object.entries(n.loot ?? {}) as [ItemId, number][]) add(it, q);
+  });
+  return { fights, gold, exp, found, cleared: s.progress.path.includes("boss") };
 }
 
 /** A lost fight, or a new journey after the boss: back to the start at full strength. Level, items and Gold stay. */

@@ -463,86 +463,224 @@ footer.row {
   overflow: hidden;
   background: radial-gradient(ellipse at 50% 30%, #1d3a2f, #0b1426 75%);
 }
-.route-wrap {
-  position: relative;
+.journey-body {
   min-height: 0;
-  height: 100%;
-  width: min(100%, 26em);
+  overflow: auto;
+  width: min(100%, 52em);
   margin-inline: auto;
 }
-.route-lines {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+.label {
+  color: var(--gold);
+  font-size: 0.85em;
+  margin: 0.5em 0 0.25em;
 }
-.route-lines line {
-  stroke: #ffffff30;
-  stroke-width: 2;
-  stroke-dasharray: 4 4;
-  vector-effect: non-scaling-stroke;
+.setup {
+  display: grid;
+  gap: 0.2em;
 }
-.route-lines line.taken {
-  stroke: var(--gold);
-  stroke-dasharray: none;
+.setup h2 {
+  font-size: 1.05em;
 }
-.route-lines line.open {
-  stroke: #fff8e0;
+.areas {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
 }
-.route {
+.areas .btn {
+  min-height: 2.4em;
+  font-size: 0.75em;
+  padding: 0;
+}
+.areas .btn.on {
+  color: var(--gold);
+}
+.diffs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+@media (max-width: 560px) {
+  .diffs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.diff {
+  display: grid;
+  gap: 0.2em;
+  align-content: start;
+  padding: 0.3em 0;
+  text-align: center;
+  font-size: 0.82em;
+}
+.diff .crowns {
+  color: #ff6b5e;
+  letter-spacing: 0.1em;
+}
+.diff.torment .crowns,
+.diff.torment b {
+  color: #c58cff;
+}
+.diff b {
+  font-size: 1.15em;
+}
+.diff.hard b { color: #ffb44d; }
+.diff.nightmare b { color: #ff6b5e; }
+.diff.normal b { color: #7fd88f; }
+.diff dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1em 0.4em;
+  margin: 0;
+  text-align: left;
+}
+.diff dd {
+  margin: 0;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.diff small {
+  color: var(--muted, #9aa6bd);
+}
+.diff.on small {
+  color: #7fd88f;
+}
+@media (max-height: 460px) {
+  /* short landscape: one row of areas, difficulty cards keep only crowns and name */
+  .areas {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+  }
+  .diff dl,
+  .diff small {
+    display: none;
+  }
+}
+.setup-foot {
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5em;
+}
+.choose {
+  display: grid;
+  gap: 0.5em;
+}
+.progress {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.2em 0.6em;
+  font-size: 0.85em;
+}
+.progress b {
+  color: #7fd88f;
+}
+.progress small {
+  grid-column: 1 / -1;
+  color: var(--muted, #9aa6bd);
+}
+.pips {
+  display: flex;
+  gap: 3px;
+}
+.pips i {
+  flex: 1;
+  height: 6px;
+  background: #ffffff22;
+}
+.pips i.on {
+  background: #7fd88f;
+}
+.events {
+  display: grid;
+  gap: 8px;
+}
+.event {
+  display: grid;
+  grid-template-columns: minmax(0, 9em) minmax(0, 1fr) minmax(0, 11em);
+  gap: 0.7em;
+  align-items: stretch;
+  padding: 0.2em;
+  text-align: left;
+  font-size: 0.9em;
+}
+@media (max-width: 560px) {
+  .event {
+    grid-template-columns: minmax(0, 6.5em) minmax(0, 1fr);
+  }
+  .event .rate {
+    grid-column: 1 / -1;
+  }
+}
+.event .scene {
   position: relative;
-  height: 100%;
+  display: grid;
+  place-items: center;
+  min-height: 4.5em;
+  background: linear-gradient(#28472f 55%, #3a3346 55%);
+  overflow: hidden;
+}
+.event .scene .sprite-box {
+  position: absolute;
+  inset: 0 30% 0 0;
+  border: 0;
+  border-image: none;
+  background: none;
+}
+.event .glyph {
+  position: absolute;
+  right: 12%;
+  bottom: 18%;
+  font-size: 1.6em;
+  color: var(--gold);
+  text-shadow: 0 2px 0 #000;
+}
+.event.battle .glyph,
+.event.boss .glyph {
+  color: #ff6b5e;
+}
+.event .what {
+  display: grid;
+  align-content: center;
+  gap: 0.15em;
+}
+.event .what b {
+  color: var(--gold);
+  font-size: 1.1em;
+}
+.event .what small {
+  color: #ffb44d;
+}
+.event .rate {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: center;
+  gap: 0.1em 0.5em;
+  padding: 0.3em 0.5em;
+  background: #0b142699;
+  font-size: 0.85em;
+}
+.event .rate small {
+  grid-column: 1 / -1;
+  color: var(--muted, #9aa6bd);
+}
+.stars i {
+  font-style: normal;
+  color: #ffffff30;
+}
+.stars.danger i.on {
+  color: #ff5e5e;
+}
+.stars.reward i.on {
+  color: #ffd257;
+}
+.tally {
+  display: grid;
+  gap: 0.2em;
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  grid-auto-rows: minmax(0, 1fr);
 }
-.route-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: center;
-  justify-items: center;
-  min-height: 0;
-}
-.node {
-  display: grid;
-  place-items: center;
-  height: min(3.4em, 96%);
-  aspect-ratio: 1;
-  font-size: 1.1em;
-  line-height: 1;
-}
-.node small {
-  font-size: 0.5em;
-  max-width: 7em;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.node:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.node.done,
-.node.here {
-  opacity: 1;
-  filter: saturate(0.6);
-}
-.node.open {
-  animation: pulse 1.2s ease-in-out infinite alternate;
-}
-.node.boss {
-  height: min(4.2em, 100%);
-}
-/* Glow, not scale: a moving box would never settle for a tap target check. */
-@keyframes pulse {
-  to {
-    filter: brightness(1.4);
-  }
-}
-.reduced .node.open {
-  animation: none;
+.tally li {
+  color: var(--gold);
 }
 .hud {
   position: absolute;
@@ -591,7 +729,8 @@ footer.row {
 .talk {
   position: absolute;
   inset: auto 0.4em 0.4em;
-  max-height: 42%;
+  max-height: 70%;
+  overflow: auto;
   display: grid;
   gap: 0.4em;
   padding: 0.7em 0.9em;
@@ -866,16 +1005,14 @@ footer.row {
   color: #fff8e0;
 }
 .cycle .btn,
-.menu-btn,
-.node {
+.menu-btn {
   border-width: 16px;
   border-image: url("./ui/slot.png") 8 fill / 16px;
   padding: 0;
 }
-.node.open,
-.node.here {
-  border-image-source: url("./ui/slot-on.png");
-  color: var(--gold);
+.diff.on,
+.areas .btn.on {
+  border-image-source: url("./ui/btn-on.png");
 }
 .dialog,
 .talk,

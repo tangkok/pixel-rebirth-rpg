@@ -27,7 +27,7 @@ async function expectNoScroll(page: Page) {
 }
 
 const route = (page: Page) => page.locator("main.journey");
-const node = (page: Page, id: string) => page.locator(`.node[data-node="${id}"]`);
+const node = (page: Page, id: string) => page.locator(`.event[data-node="${id}"]`);
 const saved = (page: Page): Promise<SaveData> => page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!));
 
 async function newHero(page: Page) {
@@ -42,6 +42,7 @@ async function newHero(page: Page) {
   await expect(page.locator(".slot.landed")).toHaveCount(1);
   await next.click();
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
   await expect(route(page)).toHaveAttribute("data-node", "start");
 }
 /** Edits the stored save, then continues from the title so the journey reloads it. */
@@ -69,7 +70,7 @@ async function winDuel(page: Page) {
     if (cur < 60 && (await item.isEnabled())) {
       await item.click();
       const potion = page.getByRole("button", { name: /^Potion/ });
-      if (await potion.isEnabled()) {
+      if ((await potion.count()) && (await potion.isEnabled())) {
         await potion.click();
         continue;
       }
@@ -90,13 +91,15 @@ test.beforeEach(async ({ page }) => {
 
 test("a fight, a chest and a rest each apply once and survive a reload", async ({ page }) => {
   await newHero(page);
-  await expect(node(page, "r2a")).toBeDisabled(); // only the start row is open
+  await expect(page.locator(".event")).toHaveCount(2); // only the start row is offered
   await node(page, "r1a").click();
   await winDuel(page);
+  await expect(page.getByRole("dialog")).toContainText("ชัยชนะ!");
+  await page.getByRole("button", { name: "ดำเนินต่อ" }).click();
   await expect(route(page)).toHaveAttribute("data-node", "r1a");
   const gold = lootOf("forest_wolf", "r1a")!.gold;
   await expect(page.locator(".hud-stats")).toContainText(`${gold} G`);
-  await expect(node(page, "r1b")).toBeDisabled(); // the other branch is closed now
+  await expect(node(page, "r1b")).toHaveCount(0); // the other branch is closed now
 
   await node(page, "r2a").dblclick(); // chest: double tap = one chest
   await expect(page.locator(".toast")).toContainText("Potion ×1");
@@ -108,6 +111,9 @@ test("a fight, a chest and a rest each apply once and survive a reload", async (
   await node(page, "r3a").click();
   await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
   await page.getByRole("button", { name: "เริ่มเส้นทางใหม่" }).click(); // lost at 1 HP
+  await expect(page.getByRole("dialog")).toContainText("การต่อสู้: 1"); // run summary
+  await page.getByRole("button", { name: "กลับไปเตรียมตัว" }).click();
+  await expect(page.getByRole("button", { name: "ออกเดินทาง!" })).toBeVisible();
   await expect(route(page)).toHaveAttribute("data-node", "start");
   s = await saved(page);
   expect(s.progress.path).toEqual([]);
@@ -137,17 +143,38 @@ test("Kael trades on his node and the trade survives a reload", async ({ page })
   expect([s.items.wolf_pelt, s.trade.kael.wolf_pelt, s.progress.path.at(-1)]).toEqual([3, 2, "r3b"]);
 });
 
+test("difficulty is picked before setting out and scales the enemy", async ({ page }) => {
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.locator("#hero-name").fill("Tang");
+  const next = page.getByRole("button", { name: "ถัดไป", exact: true });
+  await next.click();
+  await page.getByRole("button", { name: "Knight" }).click();
+  await next.click();
+  await next.click();
+  await page.locator(".draw .btn").click();
+  await expect(page.locator(".slot.landed")).toHaveCount(1);
+  await next.click();
+  await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await expect(page.locator(".diff.torment")).toBeDisabled(); // locked until 3 cleared journeys
+  await page.locator(".diff.nightmare").click();
+  await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
+  expect((await saved(page)).progress.diff).toBe("nightmare");
+  await node(page, "r1a").click();
+  await expect(page.locator(".fe-side.foe .fe-hp-num")).toHaveText("98"); // 70 HP ×1.4
+});
+
 test("beating the boss ends the journey and a new one keeps the hero", async ({ page }) => {
   test.setTimeout(180_000); // the boss takes many turns
   await newHero(page);
   await patch(page, "s.hero.level = 3; s.hero.exp = 80; s.items.potion = 9; s.progress.path = ['r1b', 'r2c', 'r3b', 'r4c', 'r5b'];");
   await node(page, "boss").click();
   await winDuel(page);
+  await page.getByRole("button", { name: "ดำเนินต่อ" }).click();
   await expect(page.getByRole("dialog")).toContainText("ผ่านการเดินทาง");
-  await page.getByRole("button", { name: "ออกเดินทางใหม่" }).click();
+  await page.getByRole("button", { name: "กลับไปเตรียมตัว" }).click();
   await expect(route(page)).toHaveAttribute("data-node", "start");
   const s = await saved(page);
-  expect(s.progress).toEqual({ path: [], wins: 1 });
+  expect(s.progress).toEqual({ path: [], wins: 1, diff: "normal" });
   expect(s.hero.level).toBe(3);
 });
 

@@ -334,7 +334,7 @@ function creation() {
     const name = nameCheck();
     if (!name.ok || !d.classId || !d.talent) return;
     const save = newSave(name.name, d.gender, d.classId, d.talent.id, d.look);
-    journey(save, title, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
+    journey(save, title, { notice: writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้" });
   }
 
   render();

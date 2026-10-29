@@ -1,5 +1,7 @@
 import {
   CLASS_IDS,
+  DIFFICULTY_IDS,
+  type DifficultyId,
   GENDERS,
   ITEMS,
   MAX_LEVEL,
@@ -39,6 +41,8 @@ export interface SaveData {
     path: string[];
     /** Bosses beaten (completed journeys). */
     wins: number;
+    /** Difficulty of the current journey, chosen before its first step. */
+    diff: DifficultyId;
   };
   /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
   trade: { seq: number; kael: Partial<Record<ItemId, number>> };
@@ -70,7 +74,7 @@ export function newSave(
   };
 }
 
-const freshProgress = (): SaveData["progress"] => ({ path: [], wins: 0 });
+const freshProgress = (): SaveData["progress"] => ({ path: [], wins: 0, diff: "normal" });
 const freshTrade = (): SaveData["trade"] => ({ seq: 0, kael: { ...KAEL_STOCK } });
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -121,6 +125,8 @@ export function parseSave(raw: string | null): SaveData | null {
   const path = p.path;
   if (!Array.isArray(path) || path.length > 16 || !path.every((x) => typeof x === "string") || !validPath(path as string[])) return null;
   if (!isInt(p.wins, 0, 1e6)) return null;
+  const diff = p.diff ?? "normal"; // v5 saves from before difficulties
+  if (!DIFFICULTY_IDS.includes(diff as DifficultyId)) return null;
   const t = d.trade;
   if (!isObj(t) || !isInt(t.seq, 0, 1e9) || !isObj(t.kael)) return null;
   const stock = t.kael as Record<string, unknown>;
@@ -147,7 +153,7 @@ export function parseSave(raw: string | null): SaveData | null {
     },
     items: bag,
     gold: d.gold,
-    progress: { path: [...(path as string[])], wins: p.wins },
+    progress: { path: [...(path as string[])], wins: p.wins, diff: diff as DifficultyId },
     trade: { seq: t.seq, kael },
     savedAt: d.savedAt,
   };
