@@ -557,20 +557,107 @@ footer.row {
 .talk .row {
   justify-content: flex-end;
 }
+/* ---------- duel ---------- */
+@media (orientation: portrait) {
+  .encounter {
+    grid-template: "steps" auto "sprite" minmax(120px, 40%) "panel" 1fr "foot" auto / 1fr;
+  }
+}
 .duel {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: calc(8px * var(--k, 1));
+  justify-items: center;
+  padding: 3.6em 0 0;
+  background: linear-gradient(#1d3b5a, #16304a 55%, #1f3a24 55%, #11261a);
 }
 .duel .sprite {
   position: static;
   translate: none;
+  transition: translate 0.18s ease-out;
 }
 .duel .foe {
   width: calc(32px * var(--k, 1));
   height: calc(24px * var(--k, 1));
   image-rendering: pixelated;
+  transition: translate 0.18s ease-out, filter 0.18s;
+}
+.duel.hero-strikes .sprite { translate: 30% 0; }
+.duel.hero-strikes .foe { filter: brightness(2.2) saturate(0.2); }
+.duel.foe-strikes .foe { translate: -60% 0; }
+.duel.foe-strikes .sprite { filter: brightness(2) saturate(0.3); }
+.duel.hero-guards .sprite,
+.duel.foe-guards .foe { filter: drop-shadow(0 0 4px #8fd3ff); }
+.duel.foe-down .foe { opacity: 0.25; translate: 0 20%; }
+.duel.hero-down .sprite { opacity: 0.35; }
+.reduced .duel * { transition: none !important; }
+@media (prefers-reduced-motion: reduce) { .duel * { transition: none !important; } }
+.bars {
+  position: absolute;
+  inset: 0.4em 0.4em auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6em;
+  font-size: 0.8em;
+}
+.bar {
+  display: grid;
+  gap: 0.15em;
+  min-width: 0;
+  padding: 0.3em 0.5em;
+  background: #0b1426cc;
+  border-radius: 6px;
+}
+.bar b, .bar span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track {
+  height: 8px;
+  background: #3a1820;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4fd46b, #9be37a);
+  transition: width 0.3s;
+}
+.pop {
+  position: absolute;
+  top: 38%;
+  font-size: 1.6em;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 0 #240000, 0 0 6px #240000;
+  opacity: 0;
+  pointer-events: none;
+}
+.pop.at-foe { right: 22%; }
+.pop.at-hero { left: 22%; color: #ff9a8f; }
+.pop.heal { color: var(--up); }
+.pop.on { animation: pop 0.5s ease-out forwards; }
+@keyframes pop {
+  0% { opacity: 0; translate: 0 6px; }
+  20% { opacity: 1; translate: 0 0; }
+  100% { opacity: 0; translate: 0 -14px; }
+}
+.intent {
+  color: var(--gold);
+  font-weight: 600;
+}
+.log {
+  min-height: 1.4em;
+}
+.cmds {
+  grid-area: foot;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.4em;
+}
+.cmds .skip {
+  grid-column: 1 / -1;
+}
+@media (orientation: landscape) and (min-aspect-ratio: 3/2) {
+  .cmds { grid-template-columns: repeat(4, 1fr); }
 }
 @media (max-height: 420px) {
   .pad {

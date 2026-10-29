@@ -1,10 +1,11 @@
 // Top-down exploration screen. Draws the map and forwards input; every game rule lives in
 // world.ts and every committed change goes through commit() so it is saved atomically.
 import { ENEMIES, ITEMS, type ItemId } from "./data";
+import { duel } from "./duel";
 import { effectiveStats } from "./hero";
 import { ANIMS, FRAME_H, FRAME_W, type Look } from "./looks";
 import { writeSave, type SaveData } from "./save";
-import { button, composite, h, root, show, still, store } from "./ui";
+import { button, composite, h, show, still, store } from "./ui";
 import {
   acceptQuest,
   CHECKPOINTS,
@@ -34,6 +35,7 @@ const KEYS: Record<string, Dir> = {
 };
 // Elaine wears a fixed Heroes99 look so she reads as a ranger scout.
 const ELAINE: Look = { skin: 2, face: 3, hair: "f4", hairColor: 6, outfit: 11, outfitColor: 2 };
+const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId);
 const HERO_FOOT = { x: 41, y: 34 }; // feet of the Heroes99 body inside its 100x40 frame
 
 const img = (src: string) =>
@@ -184,8 +186,8 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     if (t.kind === "npc") return talkElaine();
     if (t.kind === "sign") return talk("ป้าย", t.text, [["ปิด", close]]);
     if (t.kind === "crystal")
-      return talk("คริสตัลแห่งการบันทึก", "บันทึกการเดินทางและตั้งจุดเริ่มใหม่ที่นี่?", [
-        ["บันทึก", () => (commit(setCheckpoint(save, t.id), "บันทึกเกมแล้ว ✓"), close())],
+      return talk("คริสตัลแห่งการบันทึก", "บันทึกการเดินทาง ฟื้นฟู HP/MP และตั้งจุดเริ่มใหม่ที่นี่?", [
+        ["บันทึก", () => (commit(setCheckpoint(save, t.id), "บันทึกเกมแล้ว ✓ ฟื้นฟูเต็ม"), close())],
         ["ยกเลิก", close],
       ]);
     if (save.progress.claimed.includes(t.id)) return talk("หีบสมบัติ", "หีบว่างเปล่า", [["ปิด", close]]);
@@ -255,50 +257,32 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
     ]);
   }
 
-  // ---------- encounter (placeholder until the milestone 3 battle engine) ----------
+  // ---------- encounter ----------
   function encounter(e: Extract<Entity, { kind: "enemy" }>) {
     if (busy) return;
     busy = true;
     held = null;
     leave();
-    const foe = ENEMIES[e.enemy];
-    const wolf = h("canvas", { class: "foe", width: 32, height: 24 });
-    loadArt().then(([, w]) => wolf.getContext("2d")!.drawImage(w, 0, 0, 32, 24, 0, 0, 32, 24)).catch(() => void 0);
-    const hero = h("canvas", { class: "sprite duel-hero", width: FRAME_W, height: FRAME_H });
-    composite(save.hero.look, save.hero.classId).then((c) => hero.getContext("2d")!.drawImage(c, 0, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H)).catch(() => void 0);
-    const back = (s: SaveData, msg: string) => explore(s, toTitle, msg);
-    let done = false;
-    const once = (fn: () => void) => () => {
-      if (done) return;
-      done = true;
-      fn();
-    };
-    show(
-      h(
-        "main",
-        { class: "screen create encounter" },
-        h("header", { class: "area" }, h("b", {}, `${foe.name} ปรากฏตัว!`), h("span", {}, map().name)),
-        h("div", { class: "sprite-box duel", role: "img", aria: { label: `${save.hero.name} ปะทะ ${foe.name}` } }, hero, wolf),
-        h(
-          "section",
-          { class: "panel" },
-          h("p", { class: "meta" }, `${foe.name} · HP ${foe.stats.maxHp} · ATK ${foe.stats.atk} · SPD ${foe.stats.spd} · EXP ${foe.exp}`),
-          h("p", { class: "hint" }, "PLACEHOLDER: ระบบต่อสู้แบบเทิร์น (Attack/Skill/Defend/Item) จะมาในขั้นที่ 3 ตอนนี้กด “ชนะ (ทดสอบ)” เพื่อเดินเควสต่อได้"),
-        ),
-        h(
-          "footer",
-          { class: "row" },
-          button("ถอยกลับ", once(() => back(withPos(save), "ถอยกลับมาแล้ว"))),
-          button("ชนะ (ทดสอบ)", once(() => {
-            const next = recordVictory(withPos(save), e.id);
-            const s = { ...next, savedAt: Date.now() };
-            const ok = writeSave(store, s);
-            back(s, `ชนะ ${foe.name} · +${foe.exp} EXP${ok ? "" : " · บันทึกไม่ได้"}`);
-          }), { class: "primary" }),
-        ),
-      ),
-    );
-    fitDuel();
+    const here = withPos(save);
+    duel(here, e.id, e.enemy, map().name, (b) => {
+      if (b.over === "win") {
+        const won = recordVictory(here, e.id);
+        const next: SaveData = { ...won, hero: { ...won.hero, hp: b.hero.hp, mp: b.hero.mp }, items: b.items, savedAt: Date.now() };
+        const ok = writeSave(store, next);
+        return explore(next, toTitle, `ชนะ ${ENEMIES[e.enemy].name} · +${ENEMIES[e.enemy].exp} EXP${ok ? "" : " · บันทึกไม่ได้"}`);
+      }
+      // Loss: back to the last checkpoint at full strength; the pre-battle save is otherwise kept.
+      const c = CHECKPOINTS[here.progress.checkpoint];
+      const s = heroStatsOf(here);
+      const next: SaveData = {
+        ...here,
+        hero: { ...here.hero, hp: s.maxHp, mp: s.maxMp },
+        progress: { ...here.progress, map: c.map, x: c.x, y: c.y },
+        savedAt: Date.now(),
+      };
+      writeSave(store, next);
+      explore(next, toTitle, "พ่ายแพ้ · ฟื้นคืนที่จุดเซฟล่าสุด");
+    });
   }
 
   // ---------- input ----------
@@ -431,12 +415,4 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   if (notice) toast(notice);
   (act.hidden ? main.querySelector<HTMLElement>(".menu-btn") : act)?.focus({ preventScroll: true });
   requestAnimationFrame(frame);
-}
-
-/** Integer pixel scale for the duel placeholder sprites. */
-function fitDuel() {
-  const box = root.querySelector<HTMLElement>(".duel");
-  if (!box) return;
-  const k = Math.max(1, Math.floor(Math.min(box.clientWidth / 140, box.clientHeight / 40)));
-  box.style.setProperty("--k", String(k));
 }

@@ -29,7 +29,7 @@ async function newHero(page: Page) {
   await page.locator("#hero-name").fill("Tang");
   const next = page.getByRole("button", { name: "ถัดไป", exact: true });
   await next.click();
-  await page.getByRole("button", { name: "Cleric" }).click();
+  await page.getByRole("button", { name: "Berserk" }).click();
   await next.click();
   await next.click();
   await page.locator(".draw .btn").click();
@@ -50,12 +50,33 @@ async function walk(page: Page, path: string) {
     await expect(world(page)).not.toHaveAttribute("data-pos", before!);
   }
 }
-/** Steps into an enemy and wins the placeholder fight. */
+/** Steps into an enemy and wins the duel: potion when low, skill when affordable, else attack. */
 async function fight(page: Page, key: keyof typeof KEY) {
   await page.keyboard.press(KEY[key]);
   await expect(page.locator(".encounter")).toBeVisible();
-  const win = page.getByRole("button", { name: "ชนะ (ทดสอบ)" });
-  await win.dblclick(); // a double tap must still count once
+  const back = page.getByRole("button", { name: "กลับสู่แผนที่" });
+  for (let turn = 0; turn < 40 && !(await back.isVisible()); turn++) {
+    const skip = page.getByRole("button", { name: "ข้าม ⏭" });
+    if (await skip.isVisible()) await skip.click();
+    const cmds = page.locator(".cmds button:not(:disabled)");
+    await expect(cmds.first()).toBeVisible();
+    if (await back.isVisible()) break;
+    const hp = await page.locator(".bar span").first().textContent();
+    const [cur] = hp!.match(/\d+/g)!.map(Number);
+    const item = page.getByRole("button", { name: "Item ไอเทม" });
+    if (cur < 60 && (await item.isEnabled())) {
+      await item.click();
+      const potion = page.getByRole("button", { name: /^Potion/ });
+      if (await potion.isEnabled()) {
+        await potion.click();
+        continue;
+      }
+      await page.getByRole("button", { name: "กลับ", exact: true }).click();
+    }
+    const skill = page.locator(".cmds button").nth(1);
+    await ((await skill.isEnabled()) ? skill : page.getByRole("button", { name: "Attack โจมตี" })).dblclick(); // double tap = one action
+  }
+  await back.click();
   await expect(world(page)).toBeVisible();
 }
 const saved = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!));
@@ -98,13 +119,14 @@ test("full forest_troubles loop survives reloads without duplicate credit", asyn
   await walk(page, "L".repeat(15) + "UUU" + "L");
   await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
   await walk(page, "L".repeat(9) + "UUU");
+  const before = (await saved(page)).items.potion;
   await page.keyboard.press("e");
   await page.getByRole("button", { name: /รับรางวัล/ }).dblclick();
   await expect(world(page)).toHaveAttribute("data-quest", "COMPLETED");
   await expect(page.locator(".hud-stats")).toContainText("100 G");
   const done = await saved(page);
   expect(done.gold).toBe(100);
-  expect(done.items.potion).toBe(5); // 3 starting + 2 reward
+  expect(done.items.potion).toBe(before + 2); // reward added once on top of what the fights left
   expect(done.hero.level).toBe(2); // 60 EXP (PLACEHOLDER curve 0/30/80)
 
   await page.reload();
@@ -150,9 +172,12 @@ for (const size of SIZES) {
     await walk(page, "DDD" + "R".repeat(10) + "R".repeat(7));
     await page.keyboard.press("ArrowUp");
     await expect(page.locator(".encounter")).toBeVisible();
+    await expect(page.locator(".intent")).toContainText("Bite");
     await expectNoScroll(page);
-    await page.getByRole("button", { name: "ถอยกลับ" }).click();
-    await expect(world(page)).toHaveAttribute("data-pos", "8,8");
+    await page.getByRole("button", { name: "Attack โจมตี" }).click();
+    await expectNoScroll(page); // mid-playback, skip button showing
+    await page.setViewportSize({ width: size.height, height: size.width }); // rotate mid-fight
+    await expectNoScroll(page);
   });
 }
 
@@ -161,4 +186,29 @@ test("touch buttons walk the hero", async ({ page }) => {
   await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerdown");
   await page.getByRole("button", { name: "เดินซ้าย" }).dispatchEvent("pointerup");
   await expect(world(page)).toHaveAttribute("data-pos", "13,9");
+});
+
+test("losing a duel returns to the checkpoint at full HP and keeps the wolf", async ({ page }) => {
+  await newHero(page);
+  await walk(page, "DRRRRRRRRR"); // to the forest exit
+  await walk(page, "R".repeat(7));
+  await expect(world(page)).toHaveAttribute("data-pos", "8,8");
+  await page.getByRole("button", { name: "เมนู" }).click();
+  await page.getByRole("button", { name: "กลับหน้าแรก" }).click();
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("echoes-of-astra-save")!);
+    s.hero.hp = 1;
+    localStorage.setItem("echoes-of-astra-save", JSON.stringify(s));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.keyboard.press("ArrowUp");
+  await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
+  await page.getByRole("button", { name: "กลับไปจุดเซฟ" }).click();
+  await expect(world(page)).toHaveAttribute("data-map", "oakheart_village");
+  await expect(world(page)).toHaveAttribute("data-pos", "14,9");
+  const s = await saved(page);
+  const [, max] = (await page.locator(".hud-stats").textContent())!.match(/HP (\d+)\/(\d+)/)!.slice(1).map(Number);
+  expect(s.hero.hp).toBe(max); // full, whatever the rolled talent did to MaxHP
+  expect(s.progress.defeated).toEqual([]);
 });

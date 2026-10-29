@@ -153,11 +153,12 @@ export const talentById = (id: string) => TALENTS.find((t) => t.id === id);
 /** PLACEHOLDER: enemies beyond the Forest Wolf's moves are not specified in GDD v0.3. */
 export const ENEMIES = {
   goblin: { name: "Goblin", stats: { maxHp: 60, maxMp: 0, atk: 12, def: 5, mag: 0, res: 4, spd: 9 }, exp: 12 },
-  forest_wolf: { name: "Forest Wolf", stats: { maxHp: 90, maxMp: 0, atk: 15, def: 8, mag: 0, res: 6, spd: 14 }, exp: 20 },
+  forest_wolf: { name: "Forest Wolf", stats: { maxHp: 70, maxMp: 0, atk: 13, def: 8, mag: 0, res: 6, spd: 14 }, exp: 20 },
   ancient_guardian: { name: "Ancient Guardian", stats: { maxHp: 260, maxMp: 40, atk: 20, def: 14, mag: 14, res: 12, spd: 7 }, exp: 60, boss: true },
 } as const;
 export type EnemyId = keyof typeof ENEMIES;
 
+// PLACEHOLDER: Forest Wolf tuned to 70 HP / 13 ATK so a Lv.1 hero (no stat growth yet) can clear three.
 /** PLACEHOLDER: items and elemental consumables. Potion prices live in SHOP_ECONOMY_SYSTEM (later). */
 export const ITEMS = {
   potion: { name: "Potion", heal: 50 },

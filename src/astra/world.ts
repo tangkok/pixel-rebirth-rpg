@@ -2,6 +2,7 @@
 // NPC_DIALOGUE_SYSTEM). Pure functions over SaveData so quests, chests and victories are
 // idempotent and testable; explore.ts only draws and forwards input.
 import { ENEMIES, ITEMS, LEVEL_EXP, type EnemyId, type ItemId } from "./data";
+import { effectiveStats } from "./hero";
 import type { SaveData } from "./save";
 
 export const TILE = 16;
@@ -204,9 +205,13 @@ export function openChest(s: SaveData, chestId: string): SaveData | null {
   return n;
 }
 
+/** Save crystals set the respawn point and fully restore HP/MP (PLACEHOLDER: GDD has no rest rule yet). */
 export function setCheckpoint(s: SaveData, id: CheckpointId): SaveData {
   const n = clone(s);
+  const max = effectiveStats(n.hero.classId, n.hero.talentId);
   n.progress.checkpoint = id;
+  n.hero.hp = max.maxHp;
+  n.hero.mp = max.maxMp;
   return n;
 }
 
