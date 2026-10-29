@@ -159,6 +159,6 @@ Vite ใช้ Asset URL แบบ relative จึงรองรับ path `/p
 เกมใหม่ตาม GDD v1.8 อยู่ที่ `astra/index.html` + `src/astra/` และเผยแพร่คู่กับ Pixel Rebirth ที่ `/astra/` โดยไม่แตะเกมเดิม ขั้นนี้มี Boot → Title → Character Creation (ชื่อ, เพศ, 5 อาชีพ, สุ่มพรสวรรค์ 3 ครั้งเลือก 1 จาก 20) → เซฟ/Continue ช่องเดียวพร้อมสำรองและตรวจข้อมูล
 
 - ค่าที่ GDD ยังไม่กำหนดติดป้าย `PLACEHOLDER` ใน `src/astra/data.ts` และ `src/astra/save.ts`
-- ขั้น "รูปลักษณ์" ปรับผิว ใบหน้า ทรงผม/สีผม (แยกชาย 14 แบบ หญิง 9 แบบ) ชุด/สีชุด และอาวุธ จาก layer ของ Heroes99 v1.2 (ผู้ใช้ซื้อ license แล้ว) ประกอบภาพใน browser ตามลำดับของ `layer.gif` คัดลอก layer เข้า `public/astra/h99` ด้วย `python3 -I scripts/import-heroes99.py <Heroes99_v1.2>`
+- ขั้น "รูปลักษณ์" ปรับผิว ใบหน้า ทรงผม/สีผม (แยกชาย 14 แบบ หญิง 9 แบบ) ชุด/สีชุด และอาวุธ จาก layer ของ Heroes99 v1.2 (ผู้ใช้ซื้อ license แล้ว) ประกอบภาพใน browser ตามลำดับของ `layer.gif` repo เก็บเฉพาะ atlas ท่ายืน (idle) 47 ไฟล์ ไม่เก็บไฟล์ต้นฉบับ สร้างใหม่ได้ด้วย `python3 -I scripts/import-heroes99.py <Heroes99_v1.2>`
 - Heroes99 ไม่มีธนูและกระบอง Ranger และ Cleric จึงเริ่มแบบไม่ถืออาวุธ (เลือกอาวุธอื่นแทนชั่วคราวได้) และ sprite เป็นมุมข้างอย่างเดียว ยังไม่มี 4 ทิศสำหรับ top-down
 - ทดสอบ: `npm test` (tests/astra.test.ts) และ `npm run test:e2e` (tests/browser/astra.spec.ts รวมการตรวจว่าไม่มี scroll)

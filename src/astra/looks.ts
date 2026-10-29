@@ -1,11 +1,11 @@
-// Heroes99 v1.2 layer catalog (copied into public/astra/h99 by scripts/import-heroes99.py).
+// Heroes99 v1.2 layer catalog. public/astra/h99 holds idle-pose atlases built by
+// scripts/import-heroes99.py; the row order here must match that script.
 import type { ClassId, Gender } from "./data";
 
 export const FRAME_W = 100;
 export const FRAME_H = 40;
-export const SHEET_W = 800;
-export const SHEET_H = 680;
-export const IDLE_FRAMES = 6; // row 0 = idle1
+export const STRIP_W = 800; // one idle row: 8 frame slots, 6 used
+export const IDLE_FRAMES = 6;
 
 const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
@@ -67,22 +67,28 @@ export const defaultLook = (gender: Gender, classId: ClassId): Look => ({
   ...CLASS_LOOK[classId],
 });
 
-/** Layer URLs bottom to top, following Heroes99's layer.gif order. */
-export function layers(l: Look): string[] {
-  const p = (kind: string, file: string) => `h99/${kind}/${file}.png`;
-  const w = l.weapon === "none" ? null : l.weapon;
-  const hair = `${l.hair}_c${l.hairColor}`;
-  const cloth = `cloth${l.outfit}_c${l.outfitColor}`;
+/** One layer: atlas URL and the 40px row inside it. */
+export type Layer = [src: string, row: number];
+
+/** Layers bottom to top, following Heroes99's layer.gif order. */
+export function layers(l: Look): Layer[] {
+  // Paired atlases store each colour as a bot row then a top row.
+  const pair = (src: string, color: number, top: boolean): Layer => [src, (color - 1) * 2 + (top ? 1 : 0)];
+  const hair = `h99/hair/${l.hair}.png`;
+  const cloth = `h99/cloth/cloth${l.outfit}.png`;
+  const [w, wc] = l.weapon.split("_c");
+  const weapon = l.weapon === "none" ? null : `h99/weapon/${w}.png`;
+  const wColor = wc ? Number(wc) : 1;
   return [
-    w && p("weapon", `${w}_bot`),
-    p("skin", `skin_c${l.skin}`),
-    p("face", `face_c${l.face}`),
-    p("hair", `${hair}_bot`),
-    p("cloth", `${cloth}_bot`),
-    p("hair", `${hair}_top`),
-    p("cloth", `${cloth}_top`),
-    w && p("weapon", `${w}_top`),
-  ].filter((x): x is string => !!x);
+    weapon && pair(weapon, wColor, false),
+    ["h99/skin.png", l.skin - 1] as Layer,
+    ["h99/face.png", l.face - 1] as Layer,
+    pair(hair, l.hairColor, false),
+    pair(cloth, l.outfitColor, false),
+    pair(hair, l.hairColor, true),
+    pair(cloth, l.outfitColor, true),
+    weapon && pair(weapon, wColor, true),
+  ].filter((x): x is Layer => !!x);
 }
 
 const inList = <T>(list: readonly T[], v: unknown): v is T => list.includes(v as T);

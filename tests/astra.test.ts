@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { CLASS_IDS, RARITY_ODDS, TALENTS } from "../src/astra/data";
 import {
   defaultLook,
@@ -141,20 +141,23 @@ describe("save", () => {
 });
 
 describe("Heroes99 looks", () => {
-  it("every catalogued layer exists in public/astra/h99", () => {
-    const files = new Set<string>();
+  it("every catalogued layer row exists in its atlas", () => {
+    const rows = new Map<string, number>();
+    const note = (look: Parameters<typeof layers>[0]) => {
+      for (const [src, row] of layers(look)) rows.set(src, Math.max(rows.get(src) ?? 0, row));
+    };
     for (const g of ["male", "female"] as const)
       for (const hair of HAIR_STYLES[g])
-        for (const hairColor of HAIR_COLORS)
-          for (const outfit of OUTFITS)
-            for (const outfitColor of OUTFIT_COLORS)
-              if (outfit === 1 || hairColor === 1) // full cross product is 30k looks; this still touches every file
-                for (const weapon of WEAPONS)
-                  for (const f of layers({ skin: 1, face: 1, hair, hairColor, outfit, outfitColor, weapon })) files.add(f);
-    for (const skin of SKINS) for (const face of FACES)
-      for (const f of layers({ ...defaultLook("male", "knight"), skin, face })) files.add(f);
-    expect(files.size).toBe(761);
-    for (const f of files) expect(existsSync(`public/astra/${f}`), f).toBe(true);
+        for (const hairColor of HAIR_COLORS) note({ ...defaultLook(g, "knight"), hair, hairColor });
+    for (const outfit of OUTFITS) for (const outfitColor of OUTFIT_COLORS) note({ ...defaultLook("male", "knight"), outfit, outfitColor });
+    for (const weapon of WEAPONS) note({ ...defaultLook("male", "knight"), weapon });
+    for (const skin of SKINS) for (const face of FACES) note({ ...defaultLook("male", "knight"), skin, face });
+    expect(rows.size).toBe(47);
+    for (const [src, maxRow] of rows) {
+      const png = readFileSync(`public/astra/${src}`);
+      expect(png.readUInt32BE(16), src).toBe(800); // PNG IHDR width
+      expect(png.readUInt32BE(20), src).toBe((maxRow + 1) * 40); // atlas has exactly the rows used
+    }
   });
   it("class defaults follow the GDD weapon contract where Heroes99 has the weapon", () => {
     expect(defaultLook("male", "knight").weapon).toBe("weapon1"); // sword
@@ -165,15 +168,16 @@ describe("Heroes99 looks", () => {
   });
   it("draws layers bottom to top per layer.gif", () => {
     expect(layers(defaultLook("female", "knight"))).toEqual([
-      "h99/weapon/weapon1_bot.png",
-      "h99/skin/skin_c1.png",
-      "h99/face/face_c1.png",
-      "h99/hair/f1_c1_bot.png",
-      "h99/cloth/cloth13_c8_bot.png",
-      "h99/hair/f1_c1_top.png",
-      "h99/cloth/cloth13_c8_top.png",
-      "h99/weapon/weapon1_top.png",
+      ["h99/weapon/weapon1.png", 0],
+      ["h99/skin.png", 0],
+      ["h99/face.png", 0],
+      ["h99/hair/f1.png", 0],
+      ["h99/cloth/cloth13.png", 14],
+      ["h99/hair/f1.png", 1],
+      ["h99/cloth/cloth13.png", 15],
+      ["h99/weapon/weapon1.png", 1],
     ]);
+    expect(layers({ ...defaultLook("male", "sorcerer"), weapon: "weapon5_c3" })[0]).toEqual(["h99/weapon/weapon5.png", 4]);
   });
   it("rejects looks that do not match the hero's gender", () => {
     expect(parseLook(defaultLook("male", "knight"), "female")).toBeNull();

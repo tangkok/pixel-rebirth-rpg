@@ -38,8 +38,7 @@ import {
   layers,
   OUTFIT_COLORS,
   OUTFITS,
-  SHEET_H,
-  SHEET_W,
+  STRIP_W,
   SKINS,
   WEAPON_LABEL,
   WEAPONS,
@@ -118,13 +117,14 @@ const loadImage = (src: string) => {
 
 const sheets = new Map<string, Promise<HTMLCanvasElement>>();
 function composite(look: Look) {
-  const key = layers(look).join("|");
+  const parts = layers(look);
+  const key = parts.join("|");
   let p = sheets.get(key);
   if (!p) {
-    p = Promise.all(layers(look).map(loadImage)).then((imgs) => {
-      const c = h("canvas", { width: SHEET_W, height: SHEET_H });
+    p = Promise.all(parts.map(([src]) => loadImage(src))).then((imgs) => {
+      const c = h("canvas", { width: STRIP_W, height: FRAME_H });
       const ctx = c.getContext("2d")!;
-      for (const img of imgs) ctx.drawImage(img, 0, 0);
+      imgs.forEach((img, i) => ctx.drawImage(img, 0, parts[i][1] * FRAME_H, STRIP_W, FRAME_H, 0, 0, STRIP_W, FRAME_H));
       return c;
     });
     p.catch(() => sheets.delete(key));
