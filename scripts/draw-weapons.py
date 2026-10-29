@@ -3,32 +3,52 @@
 Usage: python3 -I scripts/draw-weapons.py   (run after import-heroes99.py)
 Uses the Heroes99 sword atlas only to follow the hand (its gold hilt) per frame, and the
 pack's palette so the new pixels sit with the rest of the art. Writes
-public/astra/h99/weapon/{bow,mace}.png with rows: back idle, back run, front idle, front run.
+public/astra/h99/weapon/{bow,mace}.png with the back-layer rows of every animation, then the
+front-layer rows, in import-heroes99.py SOURCE_ROWS order.
 """
+import math
 from pathlib import Path
 
 from PIL import Image
 
 H99 = Path(__file__).resolve().parent.parent / "public/astra/h99"
 FW, FH = 100, 40
-ANIMS = (6, 8)  # idle, run frame counts; atlas rows per variant follow this order
+# Frame counts per animation, in atlas row order: idle, run, slash, thrust, cast, hurt, dying, block.
+ANIMS = (6, 8, 6, 4, 5, 4, 5, 5)
 OUT, DARK, BROWN, WOOD, GOLD, LIGHT = "#240000", "#582820", "#833f1e", "#a8642a", "#c67b02", "#faca58"
 STEEL, STEEL_D, STEEL_L, STRING = "#628d8d", "#31526b", "#a9d0cc", "#e8e0c8"
 
 
-def hand_offsets(anim: int) -> list[tuple[int, int]]:
-    """(dx, dy) of the sword hilt in each frame of an animation, relative to idle frame 0."""
+def hand_poses(anim: int) -> list[tuple[int, int, float]]:
+    """(dx, dy, turn) of the sword hand per frame relative to idle frame 0; turn is the blade's
+    rotation in radians (clockwise on screen) so a held weapon can swing with it."""
     sword = Image.open(H99 / "weapon/weapon1.png").convert("RGBA")
     front = len(ANIMS)  # front-layer rows start after the back-layer rows
 
-    def hilt(row: int, f: int) -> tuple[float, float]:
-        px = sword.crop((f * FW, row * FH, f * FW + FW, row * FH + FH)).load()
-        gold = [(x, y) for x in range(FW) for y in range(FH) if px[x, y][3] and px[x, y][0] > 150 and px[x, y][2] < 90]
-        return sum(x for x, _ in gold) / len(gold), sum(y for _, y in gold) / len(gold)
+    def pose(f: int, row: int):
+        for r in (front + row, row):  # the hand may be drawn on either layer
+            px = sword.crop((f * FW, r * FH, f * FW + FW, r * FH + FH)).load()
+            opaque = [(x, y) for x in range(FW) for y in range(FH) if px[x, y][3]]
+            gold = [(x, y) for x, y in opaque if px[x, y][0] > 150 and px[x, y][2] < 90]
+            if not gold:
+                continue
+            hx, hy = sum(x for x, _ in gold) / len(gold), sum(y for _, y in gold) / len(gold)
+            near = [(x, y) for x, y in opaque if (x, y) not in gold and 3 < math.hypot(x - hx, y - hy) < 14]
+            ang = math.atan2(sum(y - hy for _, y in near), sum(x - hx for x, _ in near)) if near else None
+            return hx, hy, ang
+        return None
 
-    x0, y0 = hilt(front, 0)
-    # The swung sword's hilt drifts forward as the blade tilts; the hand itself barely does.
-    return [(max(-2, min(2, round(x - x0))), round(y - y0)) for x, y in (hilt(front + anim, f) for f in range(ANIMS[anim]))]
+    x0, y0, a0 = pose(0, 0)
+    out, last = [], (0, 0, 0.0)
+    for f in range(ANIMS[anim]):
+        p = pose(f, anim)
+        if p:
+            dx, dy = round(p[0] - x0), round(p[1] - y0)
+            if anim < 2:  # map poses: the swung hilt drifts forward as the blade tilts; the hand barely does
+                dx = max(-2, min(2, dx))
+            last = (dx, dy, (p[2] - a0) if p[2] is not None and anim == 2 else 0.0)
+        out.append(last)
+    return out
 
 
 def put(img: Image.Image, pts, color: str, dx: int, dy: int, frame: int) -> None:
@@ -78,6 +98,18 @@ def bow(front: Image.Image, back: Image.Image, frame: int, dx: int, dy: int) -> 
     put(back, [(32, 11), (34, 11), (36, 12)], OUT, dx, dy, frame)
 
 
+GRIP = (32, 23)  # where the mace handle starts, at rest
+
+
+def swung_mace(front: Image.Image, frame: int, dx: int, dy: int, turn: float) -> None:
+    if abs(turn) < 0.05:
+        return mace(front, frame, dx, dy)
+    one = Image.new("RGBA", (FW, FH))
+    mace(one, 0, 0, 0)
+    one = one.rotate(-math.degrees(turn), resample=Image.NEAREST, center=GRIP)
+    front.alpha_composite(one, (frame * FW + dx, dy))
+
+
 def main() -> None:
     n = len(ANIMS)
     for name in ("bow", "mace"):
@@ -85,11 +117,13 @@ def main() -> None:
         for anim in range(n):
             back = Image.new("RGBA", (FW * 8, FH))
             front = Image.new("RGBA", (FW * 8, FH))
-            for i, (dx, dy) in enumerate(hand_offsets(anim)):
+            for i, (dx, dy, turn) in enumerate(hand_poses(anim)):
                 if name == "bow":
-                    bow(front, back, i, dx, dy)
+                    # The bow's grip sits ~13px ahead of the sword hilt, so an outstretched arm
+                    # already reaches it: follow only a quarter of the reach on duel moves.
+                    bow(front, back, i, dx if anim < 2 else round(dx / 4), dy)
                 else:
-                    mace(front, i, dx, dy)
+                    swung_mace(front, i, dx, dy, turn)
             sheet.paste(back, (0, FH * anim))
             sheet.paste(front, (0, FH * (n + anim)))
         sheet.save(H99 / f"weapon/{name}.png", optimize=True)

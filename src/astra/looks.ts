@@ -6,7 +6,16 @@ export const FRAME_W = 100;
 export const FRAME_H = 40;
 export const STRIP_W = 800; // one animation row: 8 frame slots
 /** Animations each atlas variant stores, in row order. */
-export const ANIMS = { idle: { row: 0, frames: 6 }, run: { row: 1, frames: 8 } } as const;
+export const ANIMS = {
+  idle: { row: 0, frames: 6 },
+  run: { row: 1, frames: 8 },
+  slash: { row: 2, frames: 6 },
+  thrust: { row: 3, frames: 4 },
+  cast: { row: 4, frames: 5 },
+  hurt: { row: 5, frames: 4 },
+  dying: { row: 6, frames: 5 },
+  block: { row: 7, frames: 5 },
+} as const;
 export type Anim = keyof typeof ANIMS;
 export const ANIM_ROWS = Object.keys(ANIMS).length;
 

@@ -1,9 +1,8 @@
-"""Build the idle-pose atlases the character creator uses from a licensed Heroes99 v1.2 pack.
+"""Build the hero atlases (map poses and duel moves) from a licensed Heroes99 v1.2 pack.
 
 Usage: python3 -I scripts/import-heroes99.py /path/to/Heroes99_v1.2
-Each atlas stacks, per variant in a fixed order that src/astra/looks.ts mirrors, the idle
-strip (source row 0, 6 frames) then the run strip (source row 2, 8 frames), 800x40 each.
-Only these strips ship, not the full source sheets.
+Each atlas stacks, per variant in a fixed order that src/astra/looks.ts ANIMS mirrors, one
+800x40 strip per SOURCE_ROWS entry. Only these strips ship, not the full source sheets.
 Requires Pillow.
 """
 import sys
@@ -11,7 +10,8 @@ from pathlib import Path
 
 from PIL import Image
 
-SOURCE_ROWS = (0, 2)  # idle1, run1
+# idle1, run1, attack1 (slash), attack3 (thrust), casting2, hurt, dying, block
+SOURCE_ROWS = (0, 2, 5, 7, 11, 12, 13, 15)
 
 
 def atlas(paths: list[Path], out: Path) -> None:

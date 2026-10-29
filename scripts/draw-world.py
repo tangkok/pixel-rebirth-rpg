@@ -2,7 +2,7 @@
 
 Usage: python3 -I scripts/draw-world.py
 Writes public/astra/world/tiles.png (one row of 16px tiles, order = TILES below, which
-src/astra/world.ts mirrors) and public/astra/world/wolf.png (2 idle frames, 32x24).
+src/astra/world.ts mirrors) and public/astra/world/wolf.png (32x24 frames, WOLF_POSES order).
 Pixel art is generated from a fixed seed so reruns give identical files. Requires Pillow.
 """
 import random
@@ -294,36 +294,80 @@ def bridge():
     return img
 
 
-def wolf_frames() -> Image.Image:
-    """Side-view grey wolf facing left, 32x24, two breathing frames."""
-    sheet = Image.new("RGBA", (64, 24))
+WOLF_POSES = ("idle", "breathe", "crouch", "leap", "bite", "hurt", "down")
+
+
+def wolf(pose: str) -> Image.Image:
+    """One 32x24 side-view grey wolf facing left in the given WOLF_POSES pose."""
+    img = Image.new("RGBA", (32, 24))
     FUR1, FUR2, FUR3, EYE = "#3a3f4f", "#5d6478", "#9aa3b5", "#ffcf4a"
-    for f in range(2):
-        img = Image.new("RGBA", (32, 24))
-        b = f  # body rises a pixel on frame 1
+    b = {"breathe": 1, "crouch": -2, "leap": 2, "bite": 1}.get(pose, 0)  # body rise
+    hx, hy = {"hurt": (2, -1), "crouch": (0, 1), "bite": (-1, 0)}.get(pose, (0, 0))  # head shift
+    if pose == "down":
+        body = [(x, y) for x in range(8, 28) for y in range(15, 22) if ((x - 18) / 10) ** 2 + ((y - 19) / 3) ** 2 <= 1]
+        head = [(x, y) for x in range(2, 13) for y in range(13, 22) if ((x - 8) / 5) ** 2 + ((y - 18) / 3.5) ** 2 <= 1]
+        snout = [(x, y) for x in range(0, 5) for y in range(18, 21)]
+        ears = [(7, 14), (8, 13), (10, 14)]
+        tail = [(27 + i, 19 + i // 3) for i in range(5)]
+        legs = [(x, 21) for x in range(10, 26)]
+    else:
         body = [(x, y) for x in range(9, 27) for y in range(10 - b, 18) if ((x - 18) / 9) ** 2 + ((y - 14 + b / 2) / 4.5) ** 2 <= 1]
-        head = [(x, y) for x in range(2, 13) for y in range(5 - b, 14 - b) if ((x - 8) / 5) ** 2 + ((y - 9 + b) / 4) ** 2 <= 1]
-        snout = [(x, y) for x in range(0, 5) for y in range(10 - b, 13 - b)]
-        ears = [(6, 3 - b), (7, 2 - b), (7, 3 - b), (9, 3 - b), (10, 2 - b), (10, 3 - b), (6, 4 - b), (10, 4 - b)]
-        tail = [(26 + i, 11 - b - i // 2) for i in range(6)] + [(27 + i, 12 - b - i // 2) for i in range(5)]
-        legs = [(x, y) for x in (11, 12, 16, 17, 21, 22, 24, 25) for y in range(17, 22)]
-        shape = set(body + head + snout + ears + tail + legs)
-        for x, y in shape:
-            px(img, x, y, FUR2)
-        for x, y in shape:  # belly / underside shade
-            if (x, y + 1) not in shape or y > 15:
-                px(img, x, y, FUR1)
-        for x, y in head + [(x, y) for x, y in body if y < 12 - b]:
-            if (x, y - 1) not in shape:
-                px(img, x, y, FUR3)
-        for x in range(32):
-            for y in range(24):
-                if (x, y) not in shape and any((x + a, y + c) in shape for a, c in ((1, 0), (-1, 0), (0, 1), (0, -1))):
-                    px(img, x, y, INK)
-        px(img, 5, 8 - b, EYE)
-        px(img, 0, 10 - b, INK)
-        px(img, 1, 12 - b, "#e8e0c8")  # fang
-        sheet.paste(img, (32 * f, 0))
+        head = [(x + hx, y + hy) for x in range(2, 13) for y in range(5 - b, 14 - b) if ((x - 8) / 5) ** 2 + ((y - 9 + b) / 4) ** 2 <= 1]
+        snout = [(x + hx, y + hy) for x in range(0, 5) for y in range(10 - b, 13 - b)]
+        ears = [(x + hx, y + hy) for x, y in ((6, 3 - b), (7, 2 - b), (7, 3 - b), (9, 3 - b), (10, 2 - b), (10, 3 - b), (6, 4 - b), (10, 4 - b))]
+        if pose == "hurt":
+            ears = [(x + 1, y + 1) for x, y in ears]  # flattened back
+        lift = -3 if pose == "crouch" else 0
+        tail = [(26 + i, 11 - b - i // 2 + lift) for i in range(6)] + [(27 + i, 12 - b - i // 2 + lift) for i in range(5)]
+        if pose == "leap":  # forelegs reach forward, hind legs kick back
+            legs = [(x - (y - 15), y) for x in (11, 12) for y in range(15, 20)] + [(x + (y - 15), y) for x in (22, 23) for y in range(15, 20)]
+        else:
+            legs = [(x, y) for x in (11, 12, 16, 17, 21, 22, 24, 25) for y in range(17, 22)]
+    shape = set(body + head + snout + ears + tail + legs)
+    if pose == "bite":  # jaws apart
+        shape |= {(x + hx, 13 - b + hy) for x in range(1, 5)}
+        mouth = {(x + hx, 11 - b + hy) for x in range(0, 4)}
+        shape -= mouth
+    for x, y in shape:
+        px(img, x, y, FUR2)
+    for x, y in shape:  # belly / underside shade
+        if (x, y + 1) not in shape or y > 15:
+            px(img, x, y, FUR1)
+    top = [(x, y) for x, y in body if y < 12 - b] if pose != "down" else []
+    for x, y in head + top:
+        if (x, y - 1) not in shape:
+            px(img, x, y, FUR3)
+    for x in range(32):
+        for y in range(24):
+            if (x, y) not in shape and any((x + a, y + c) in shape for a, c in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                px(img, x, y, INK)
+    if pose == "down":
+        px(img, 5, 17, INK)  # eye shut
+        px(img, 6, 17, INK)
+        return img
+    ex, ey = 5 + hx, 8 - b + hy
+    if pose == "hurt":
+        px(img, ex, ey, INK)
+        px(img, ex + 1, ey, INK)
+    else:
+        px(img, ex, ey, EYE)
+    if pose == "bite":
+        for x in range(0, 4):
+            px(img, x + hx, 11 - b + hy, "#8c2f3a")
+        for x in (0, 2):
+            px(img, x + hx, 10 - b + hy, "#e8e0c8")  # upper fangs
+            px(img, x + 1 + hx, 12 - b + hy, "#e8e0c8")  # lower fangs
+    else:
+        px(img, 0 + hx, 10 - b + hy, INK)
+        px(img, 1 + hx, 12 - b + hy, "#e8e0c8")  # fang
+    return img
+
+
+def wolf_frames() -> Image.Image:
+    """Wolf sheet: one 32x24 frame per WOLF_POSES entry (map uses the first two)."""
+    sheet = Image.new("RGBA", (32 * len(WOLF_POSES), 24))
+    for i, pose in enumerate(WOLF_POSES):
+        sheet.paste(wolf(pose), (32 * i, 0))
     return sheet
 
 

@@ -4,6 +4,7 @@
 import { CLASSES, ENEMIES, ITEMS, type Element, type ItemId } from "./data";
 import {
   act,
+  BURSTS,
   damage,
   foeStats,
   guard,
@@ -20,7 +21,8 @@ import {
   type Command,
   type Timing,
 } from "./battle";
-import { ANIMS, FRAME_H, FRAME_W } from "./looks";
+import { ANIMS, FRAME_H, FRAME_W, type Anim } from "./looks";
+import { heroFrame, heroMove, impactAt, keyAt, MOVES, moveLength, releaseAt, WOLF_POSES, type Key, type MoveKind, type WolfPose } from "./moves";
 import type { SaveData } from "./save";
 import { button, composite, crisp, h, settings, show, still } from "./ui";
 import { expFor } from "./world";
@@ -118,72 +120,186 @@ export function duel(
     ),
   );
 
-  // Animation state is presentation only; battle math already happened in act().
-  type Fx = { who: "hero" | "foe"; kind: "strike" | "hurt"; t0: number };
-  let fx: Fx[] = [];
-  let down: "hero" | "foe" | null = null;
+  // Animation state is presentation only; battle math already happened in act()/guard().
+  type Side = "hero" | "foe";
+  let move: { who: Side; kind: MoveKind; keys: Key[]; t0: number; burst: boolean; color: string } | null = null;
+  let reaction: { who: Side; kind: "hurt" | "block"; t0: number } | null = null;
+  let fallen: { who: Side; t0: number } | null = null;
+  let sparks: { who: Side; t0: number; big: boolean } | null = null;
+  let shake = { t0: -1e9, amp: 0 };
+  let flashT0 = -1e9; // whole-stage white flash (Astra Burst)
   let heroSheet: HTMLCanvasElement | null = null;
   const bg = new Image();
   bg.src = "world/battle_forest.png";
   const wolfImg = new Image();
   wolfImg.src = "world/wolf.png";
   composite(save.hero.look, save.hero.classId).then((c) => (heroSheet = c)).catch(() => frame.classList.add("missing"));
+  // Scratch canvas for tinting one sprite frame (hit flash, freeze) without ctx.filter,
+  // which older Safari ignores.
+  const tint = h("canvas", { width: FRAME_W, height: FRAME_H });
+  const tctx = tint.getContext("2d")!;
 
   const FOOT = 112; // platform standing line
+  const HERO_X = 64;
+  const FOE_X = 176;
   const draw = (now: number) => {
     if (!main.isConnected) return;
     const calm = still();
-    const live = fx.filter((f) => now - f.t0 < 450);
-    fx = live;
-    const off = (who: "hero" | "foe") => {
-      let x = 0;
-      for (const f of live) {
-        if (f.who !== who || calm) continue;
-        const t = (now - f.t0) / 450;
-        if (f.kind === "strike") x += (who === "hero" ? 1 : -1) * Math.round(34 * Math.sin(Math.PI * t));
-        if (f.kind === "hurt") x += t < 0.6 ? (Math.floor(now / 40) % 2 ? 2 : -2) : 0;
-      }
-      return x;
-    };
-    const flash = (who: "hero" | "foe") => live.some((f) => f.who === who && f.kind === "hurt" && (now - f.t0) % 120 < 60);
+    const quake = now - shake.t0 < 220 ? Math.round(shake.amp * Math.sin(now * 0.09)) : 0;
+    ctx.save();
     ctx.clearRect(0, 0, W, H);
+    ctx.translate(quake, 0);
     if (bg.complete && bg.naturalWidth) ctx.drawImage(bg, 0, 0);
-    const aura = (x: number) => {
-      ctx.fillStyle = "#8fd3ff55";
+
+    const pose = (who: Side): { pose: Anim | WolfPose; f: number; x: number; y: number; alpha: number } => {
+      if (fallen?.who === who) {
+        const t = now - fallen.t0;
+        return who === "hero"
+          ? { pose: "dying", f: Math.min(4, Math.floor(t / 120)), x: 0, y: 0, alpha: 1 }
+          : { pose: "down", f: 0, x: 0, y: 0, alpha: Math.max(0.35, 1 - t / 900) };
+      }
+      if (move?.who === who && now - move.t0 < moveLength(move.keys)) {
+        const key = keyAt(move.keys, now - move.t0);
+        return { pose: key.pose, f: who === "hero" ? heroFrame(key) : 0, x: key.x, y: key.y, alpha: 1 };
+      }
+      if (reaction?.who === who && now - reaction.t0 < 340) {
+        const t = now - reaction.t0;
+        const back = reaction.kind === "hurt" ? -Math.round(5 * (1 - t / 340)) : 0;
+        if (who === "foe") return { pose: reaction.kind === "hurt" ? "hurt" : "idle", f: 0, x: back, y: 0, alpha: 1 };
+        return { pose: reaction.kind, f: Math.min(ANIMS[reaction.kind].frames - 1, Math.floor(t / 80)), x: back, y: 0, alpha: 1 };
+      }
+      if (who === "hero" && b.hero.defending) return { pose: "block", f: 2, x: 0, y: 0, alpha: 1 };
+      if (who === "hero") return { pose: "idle", f: calm ? 0 : Math.floor(now / 120) % ANIMS.idle.frames, x: 0, y: 0, alpha: 1 };
+      return { pose: calm || b.foe.frozen ? "idle" : Math.floor(now / 420) % 2 ? "breathe" : "idle", f: 0, x: 0, y: 0, alpha: 1 };
+    };
+    const flashing = (who: Side) => reaction?.who === who && reaction.kind === "hurt" && now - reaction.t0 < 180 && Math.floor((now - reaction.t0) / 45) % 2 === 0;
+
+    // Draws one frame, optionally washed with a colour through the scratch canvas.
+    const blit = (img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, wash?: string) => {
+      if (!wash) return ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      tctx.globalCompositeOperation = "source-over";
+      tctx.clearRect(0, 0, FRAME_W, FRAME_H);
+      tctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      tctx.globalCompositeOperation = "source-atop";
+      tctx.fillStyle = wash;
+      tctx.fillRect(0, 0, sw, sh);
+      ctx.drawImage(tint, 0, 0, sw, sh, dx, dy, sw, sh);
+    };
+
+    const aura = (x: number, color: string, r = 1) => {
+      ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.ellipse(x, FOOT - 12, 14, 18, 0, 0, Math.PI * 2);
+      ctx.ellipse(x, FOOT - 12, 14 * r, 18 * r, 0, 0, Math.PI * 2);
       ctx.fill();
     };
-    if (b.hero.defending) aura(64);
-    if (b.foe.defending) aura(176);
-    const sprite = (who: "hero" | "foe", paint: () => void) => {
-      ctx.save();
-      ctx.globalAlpha = down === who ? 0.35 : 1;
-      if (flash(who)) ctx.filter = "brightness(2.6) saturate(0.2)";
-      paint();
-      ctx.restore();
-    };
-    const striking = live.some((f) => f.who === "hero" && f.kind === "strike");
-    const frameNo = calm ? 0 : Math.floor(now / (striking ? 80 : 120));
-    if (heroSheet) {
-      const anim = ANIMS[striking ? "run" : "idle"];
-      // Heroes99 body feet sit at (41, 34) in the 100x40 frame; drawn 1:1 like a GBA battle sprite.
-      sprite("hero", () =>
-        ctx.drawImage(heroSheet!, (frameNo % anim.frames) * FRAME_W, anim.row * FRAME_H, FRAME_W, FRAME_H, 64 - 41 + off("hero"), FOOT - 34, FRAME_W, FRAME_H),
-      );
+    const hp = pose("hero");
+    const fp = pose("foe");
+    const heroX = HERO_X + hp.x;
+    const foeX = FOE_X - fp.x;
+    if (b.hero.defending && !move) aura(heroX, "#8fd3ff55");
+    if (b.foe.defending) aura(foeX, "#8fd3ff55");
+
+    // Spell circle under the caster, and the Burst glow while it gathers power.
+    const t = move ? now - move.t0 : 0;
+    if (move && !calm) {
+      const rel = releaseAt(move.keys);
+      const cx = move.who === "hero" ? heroX : foeX;
+      if (move.kind === "spell" && t < impactAt(move.keys)) {
+        ctx.strokeStyle = move.color;
+        ctx.globalAlpha = 0.8;
+        ctx.setLineDash([3, 2]);
+        ctx.lineDashOffset = -t / 30;
+        ctx.beginPath();
+        ctx.ellipse(cx, FOOT - 1, 15, 4, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+      if (move.burst && t < (rel >= 0 ? rel : impactAt(move.keys))) aura(cx, `rgba(250,202,88,${0.25 + 0.2 * Math.sin(t / 40)})`, 1.2);
     }
-    if (wolfImg.complete && wolfImg.naturalWidth)
-      sprite("foe", () => {
-        if (b.foe.frozen) ctx.filter = "hue-rotate(180deg) saturate(0.6) brightness(1.4)";
-        ctx.drawImage(wolfImg, (calm || b.foe.frozen ? 0 : Math.floor(now / 420) % 2) * 32, 0, 32, 24, 176 - 16 + off("foe"), FOOT - 23, 32, 24);
-      });
+
+    if (heroSheet) {
+      const a = ANIMS[hp.pose as Anim];
+      // Heroes99 body feet sit at (41, 34) in the 100x40 frame; drawn 1:1 like a GBA battle sprite.
+      ctx.globalAlpha = hp.alpha;
+      blit(heroSheet, hp.f * FRAME_W, a.row * FRAME_H, FRAME_W, FRAME_H, heroX - 41, FOOT - 34 - hp.y, flashing("hero") ? "#ffffffd0" : undefined);
+      ctx.globalAlpha = 1;
+    }
+    if (wolfImg.complete && wolfImg.naturalWidth) {
+      ctx.globalAlpha = fp.alpha;
+      const wash = flashing("foe") ? "#ffffffd0" : b.foe.frozen && !b.over ? "#9fe8ff80" : undefined;
+      blit(wolfImg, WOLF_POSES.indexOf(fp.pose as WolfPose) * 32, 0, 32, 24, foeX - 16, FOOT - 23 - fp.y, wash);
+      ctx.globalAlpha = 1;
+    }
+
+    // Projectile from release to impact: an arrow, or a glowing bolt with a short trail.
+    if (move && !calm) {
+      const rel = releaseAt(move.keys);
+      const hit = impactAt(move.keys);
+      if (rel >= 0 && t >= rel && t < hit) {
+        const p = (t - rel) / (hit - rel);
+        const x0 = move.who === "hero" ? heroX + 10 : foeX - 10;
+        const x1 = move.who === "hero" ? foeX - 6 : heroX + 6;
+        const x = x0 + (x1 - x0) * p;
+        const y = FOOT - 18 - Math.round(6 * Math.sin(Math.PI * p));
+        if (move.kind === "shot") {
+          ctx.fillStyle = "#240000";
+          ctx.fillRect(Math.round(x) - 7, Math.round(y) - 1, 10, 3);
+          ctx.fillStyle = "#e8e0c8";
+          ctx.fillRect(Math.round(x) - 6, Math.round(y), 8, 1);
+          ctx.fillStyle = move.color;
+          ctx.fillRect(Math.round(x) + 1, Math.round(y) - 1, 2, 3);
+        } else {
+          for (let i = 3; i >= 0; i--) {
+            ctx.globalAlpha = 1 - i * 0.22;
+            ctx.fillStyle = i ? move.color : "#ffffff";
+            const r = i ? 4 - i : 2;
+            ctx.fillRect(Math.round(x - i * 5 * Math.sign(x1 - x0)) - r, Math.round(y) - r, r * 2, r * 2);
+          }
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Impact: a slash crescent for melee, then sparks bursting out of the target.
+    if (sparks && !calm) {
+      const st = now - sparks.t0;
+      const cx = sparks.who === "foe" ? foeX : heroX;
+      const cy = FOOT - (sparks.who === "foe" ? 12 : 18);
+      if (st < 300) {
+        const n = sparks.big ? 14 : 9;
+        for (let i = 0; i < n; i++) {
+          const ang = (i / n) * Math.PI * 2 + i;
+          const d = (sparks.big ? 34 : 22) * Math.min(1, st / 260);
+          ctx.globalAlpha = 1 - st / 300;
+          ctx.fillStyle = i % 3 ? "#ffffff" : "#faca58";
+          ctx.fillRect(Math.round(cx + Math.cos(ang) * d), Math.round(cy + Math.sin(ang) * d * 0.7), 2, 2);
+        }
+        if (move?.kind === "melee" && st < 150) {
+          ctx.globalAlpha = 1 - st / 150;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx - 4, cy - 2, 13, -1.9, 0.9);
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
     if (b.foe.aura && !b.over) {
       // Applied element: a small gem over the enemy.
       const bob = calm ? 0 : Math.round(Math.sin(now / 300));
       ctx.fillStyle = "#240000";
-      ctx.fillRect(173, FOOT - 36 + bob, 7, 7);
+      ctx.fillRect(foeX - 3, FOOT - 36 + bob, 7, 7);
       ctx.fillStyle = ELEMENT[b.foe.aura].color;
-      ctx.fillRect(174, FOOT - 35 + bob, 5, 5);
+      ctx.fillRect(foeX - 2, FOOT - 35 + bob, 5, 5);
+    }
+    ctx.restore();
+    if (now - flashT0 < 200) {
+      ctx.fillStyle = `rgba(255,255,255,${0.85 * (1 - (now - flashT0) / 200)})`;
+      ctx.fillRect(0, 0, W, H);
     }
     requestAnimationFrame(draw);
   };
@@ -327,14 +443,19 @@ export function duel(
     let heroHp = before.hero.hp;
     let foeHp = before.foe.hp;
     let astra = before.hero.astra;
-    let timer = 0;
+    const timers: number[] = [];
+    const later = (ms: number, f: () => void) => timers.push(window.setTimeout(f, ms));
     const who = (by: "hero" | "foe") => (by === "hero" ? save.hero.name : foe.name);
+    const skill = CLASSES[b.classId].skill;
+    const burstName = CLASSES[b.classId].burst;
     return new Promise((resolve) => {
       const finish = () => {
-        clearTimeout(timer);
+        timers.forEach(clearTimeout);
         skipTo = null;
-        fx = [];
-        down = b.over === "win" ? "foe" : b.over === "lose" ? "hero" : null;
+        move = null;
+        reaction = null;
+        sparks = null;
+        fallen = b.over ? { who: b.over === "win" ? "foe" : "hero", t0: -1e9 } : null;
         bars();
         resolve();
       };
@@ -346,13 +467,39 @@ export function duel(
         const e = events[i++];
         const now = performance.now();
         if (e.type === "hit") {
-          if (e.by === "hero") foeHp = e.hp;
-          else heroHp = e.hp;
-          astra = e.astra;
-          fx.push({ who: e.by, kind: "strike", t0: now }, { who: e.by === "hero" ? "foe" : "hero", kind: "hurt", t0: now + 160 });
-          const tag = [e.timing && TIMING_TAG[e.timing] && `${TIMING_TAG[e.timing]}${e.by === "foe" ? " Guard" : ""}`, e.reaction && REACTIONS[e.reaction]].filter(Boolean).join(" · ");
-          const freeze = e.reaction === "freeze" ? ` · ${foe.name} ถูกแช่แข็ง!` : "";
-          say(`${who(e.by)} ใช้ ${e.name}${tag ? ` · ${tag}` : ""} · ${e.damage} ดาเมจ${freeze}`, e.damage ? `${tag ? `${tag} ` : ""}-${e.damage}` : `${tag} Block!`, e.by === "hero" ? "at-foe" : "at-hero");
+          const target: Side = e.by === "hero" ? "foe" : "hero";
+          const burst = e.by === "hero" && e.name === burstName;
+          const blocked = e.by === "foe" && (e.damage === 0 || before.hero.defending);
+          const impact = () => {
+            if (e.by === "hero") foeHp = e.hp;
+            else heroHp = e.hp;
+            astra = e.astra;
+            const tag = [e.timing && TIMING_TAG[e.timing] && `${TIMING_TAG[e.timing]}${e.by === "foe" ? " Guard" : ""}`, e.reaction && REACTIONS[e.reaction]].filter(Boolean).join(" · ");
+            const freeze = e.reaction === "freeze" ? ` · ${foe.name} ถูกแช่แข็ง!` : "";
+            say(`${who(e.by)} ใช้ ${e.name}${tag ? ` · ${tag}` : ""} · ${e.damage} ดาเมจ${freeze}`, e.damage ? `${tag ? `${tag} ` : ""}-${e.damage}` : `${tag} Block!`, e.by === "hero" ? "at-foe" : "at-hero");
+            bars(heroHp, foeHp, astra);
+            const t1 = performance.now();
+            reaction = { who: target, kind: blocked ? "block" : "hurt", t0: t1 };
+            const big = burst || e.timing === "perfect";
+            sparks = { who: target, t0: t1, big };
+            shake = { t0: t1, amp: burst ? 4 : big ? 3 : e.damage ? 1 : 0 };
+            if (burst) flashT0 = t1;
+          };
+          if (still()) {
+            impact();
+            return step();
+          }
+          const magic = e.by === "foe" ? false : e.name === skill.name ? skill.kind === "magic" : burst ? BURSTS[b.classId].kind === "magic" : e.name !== "Attack";
+          const kind: MoveKind = e.by === "foe" ? "bite" : heroMove(b.classId, magic);
+          const element = e.name === skill.name ? skill.element : (Object.values(ITEMS).find((it) => it.name === e.name) as { element?: Element } | undefined)?.element;
+          const color = element ? ELEMENT[element].color : burst ? "#faca58" : b.classId === "cleric" ? "#ffe9a8" : kind === "shot" ? "#c67b02" : "#c9a5ff";
+          move = { who: e.by, kind, keys: MOVES[kind], t0: now, burst, color };
+          later(impactAt(move.keys), impact);
+          later(moveLength(move.keys) + 120, () => {
+            move = null;
+            step();
+          });
+          return;
         } else if (e.type === "heal") {
           heroHp = e.hp;
           say(`${e.name} ฟื้นฟู ${e.amount} HP`, `+${e.amount}`, "at-hero heal");
@@ -365,7 +512,7 @@ export function duel(
           say(`${foe.name} ถูกแช่แข็ง ข้ามเทิร์นนี้!`, "Freeze", "at-foe");
         } else if (e.type === "revive") {
           heroHp = e.hp;
-          down = null;
+          fallen = null;
           say(`Phoenix Soul! ${save.hero.name} ฟื้นคืนชีพด้วย ${e.hp} HP`, `+${e.hp}`, "at-hero heal");
         } else if (e.type === "defend") {
           say(`${who(e.by)} ตั้งท่าป้องกัน (ดาเมจที่รับ ×0.5)`, "", "");
@@ -375,11 +522,12 @@ export function duel(
           return step();
         } else {
           say(e.result === "win" ? `${foe.name} ล้มลงแล้ว!` : `${save.hero.name} หมดแรง…`, "", "");
-          down = e.result === "win" ? "foe" : "hero";
+          fallen = { who: e.result === "win" ? "foe" : "hero", t0: now };
         }
+        if (e.type === "defend" && e.by === "hero") reaction = { who: "hero", kind: "block", t0: now };
         bars(heroHp, foeHp, astra);
         if (still()) return step();
-        timer = window.setTimeout(step, STEP_MS);
+        later(e.type === "end" ? 900 : STEP_MS, step);
       };
       step();
     });
