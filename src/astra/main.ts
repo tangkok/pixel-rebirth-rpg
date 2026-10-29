@@ -3,7 +3,7 @@ import "@fontsource-variable/dm-sans";
 import "@fontsource/noto-sans-thai/400.css";
 import "@fontsource/noto-sans-thai/600.css";
 import "./astra.css";
-import { explore } from "./explore";
+import { journey } from "./journey";
 import { button, composite, h, heroSprite, root, setSettings, settings, show, still, store, type Child } from "./ui";
 import {
   CLASSES,
@@ -69,7 +69,7 @@ function title(notice = "") {
         "nav",
         { class: "menu", aria: { label: "เมนูหลัก" } },
         button("New Game", () => (save ? confirmOverwrite(save) : creation()), { class: "primary" }),
-        button("Continue", () => save && explore(save, title), {
+        button("Continue", () => save && journey(save, title), {
           disabled: !save,
           aria: { describedby: "continue-note" },
         }),
@@ -121,8 +121,6 @@ function settingsPanel(back: () => void) {
           /* session-only settings */
         }
         document.documentElement.classList.toggle("reduced", settings.reducedMotion);
-document.documentElement.classList.toggle("no-fx", !settings.lighting);
-        document.documentElement.classList.toggle("no-fx", !settings.lighting);
       },
     });
     return h("label", { class: "toggle" }, input, h("span", {}, h("b", {}, label), h("small", {}, hint)));
@@ -137,7 +135,6 @@ document.documentElement.classList.toggle("no-fx", !settings.lighting);
         h("h2", { id: "set-title" }, "Settings"),
         toggle("autoTiming", "Auto timing", "จังหวะ Perfect Strike/Guard ถือเป็น Normal โดยอัตโนมัติ"),
         toggle("reducedMotion", "ลดการเคลื่อนไหว", "ปิดแอนิเมชันตัวละครและเอฟเฟกต์"),
-        toggle("lighting", "แสงเงา HD-2D", "แสงตะเกียง ลำแสงแดด และเบลอระยะชัด ปิดได้ถ้าเครื่องกระตุก"),
         button("กลับ", back, { class: "primary" }),
       ),
     ),
@@ -337,7 +334,7 @@ function creation() {
     const name = nameCheck();
     if (!name.ok || !d.classId || !d.talent) return;
     const save = newSave(name.name, d.gender, d.classId, d.talent.id, d.look);
-    explore(save, title, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
+    journey(save, title, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
   }
 
   render();

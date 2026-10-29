@@ -11,27 +11,16 @@ import {
 } from "./data";
 import { checkName, effectiveStats } from "./hero";
 import { parseLook, type Look } from "./looks";
+import { validPath } from "./route";
 import { KAEL_STOCK } from "./trade";
-import {
-  CHECKPOINTS,
-  MAP_IDS,
-  MAPS,
-  QUEST_REWARD_ID,
-  QUEST_STATES,
-  START,
-  type CheckpointId,
-  type Dir,
-  type MapId,
-  type QuestState,
-} from "./world";
 
 export const SAVE_KEY = "echoes-of-astra-save";
 export const BACKUP_KEY = "echoes-of-astra-save-backup";
 export const SETTINGS_KEY = "echoes-of-astra-settings";
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 5;
 
 export interface SaveData {
-  version: 3;
+  version: 5;
   hero: {
     name: string;
     gender: Gender;
@@ -46,16 +35,10 @@ export interface SaveData {
   items: Record<ItemId, number>;
   gold: number;
   progress: {
-    map: MapId;
-    x: number;
-    y: number;
-    facing: Dir;
-    checkpoint: CheckpointId;
-    /** Map-scoped encounter ids that were won; they never respawn or count twice. */
-    defeated: string[];
-    /** One-time chest and reward ids already granted. */
-    claimed: string[];
-    quest: { state: QuestState; kills: string[] };
+    /** Route nodes taken this journey, start to current; a node is never applied twice. */
+    path: string[];
+    /** Bosses beaten (completed journeys). */
+    wins: number;
   };
   /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
   trade: { seq: number; kael: Partial<Record<ItemId, number>> };
@@ -65,10 +48,8 @@ export interface SaveData {
 export interface Settings {
   autoTiming: boolean;
   reducedMotion: boolean;
-  /** HD-2D light, colour grade and depth-of-field blur on the map. */
-  lighting: boolean;
 }
-export const DEFAULT_SETTINGS: Settings = { autoTiming: false, reducedMotion: false, lighting: true };
+export const DEFAULT_SETTINGS: Settings = { autoTiming: false, reducedMotion: false };
 
 export function newSave(
   name: string,
@@ -83,32 +64,19 @@ export function newSave(
     hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp },
     items: { ...STARTING_ITEMS },
     gold: 0,
-    progress: {
-      ...START,
-      facing: "down",
-      checkpoint: "oakheart_square",
-      defeated: [],
-      claimed: [],
-      quest: { state: "AVAILABLE", kills: [] },
-    },
+    progress: freshProgress(),
     trade: freshTrade(),
     savedAt: Date.now(),
   };
 }
 
+const freshProgress = (): SaveData["progress"] => ({ path: [], wins: 0 });
 const freshTrade = (): SaveData["trade"] => ({ seq: 0, kael: { ...KAEL_STOCK } });
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown, min: number, max: number): v is number =>
   Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
-const ID = /^[a-z0-9_:]{1,40}$/;
-const idList = (v: unknown, allowed: (id: string) => boolean): string[] | null =>
-  Array.isArray(v) && v.length <= 64 && v.every((x) => typeof x === "string" && ID.test(x) && allowed(x)) && new Set(v).size === v.length
-    ? [...(v as string[])]
-    : null;
-const enemyIds = new Set(Object.values(MAPS).flatMap((m) => m.entities.filter((e) => e.kind === "enemy").map((e) => e.id)));
-const claimIds = new Set([QUEST_REWARD_ID, ...Object.values(MAPS).flatMap((m) => m.entities.filter((e) => e.kind === "chest").map((e) => e.id))]);
 
 /** Validates untrusted save JSON. Returns null on anything unexpected. */
 export function parseSave(raw: string | null): SaveData | null {
@@ -123,6 +91,8 @@ export function parseSave(raw: string | null): SaveData | null {
   if (d.version === 1) d = migrateV1(d);
   if (isObj(d) && d.version === 2) d = { ...d, version: 3, trade: freshTrade() };
   if (isObj(d) && d.version === 4) d = dropShop(d);
+  // v3 walked Oakheart and the forest; the owner replaced both with a route. Keep the hero, bag and Gold.
+  if (isObj(d) && d.version === 3) d = { ...d, version: 5, progress: freshProgress() };
   if (!isObj(d) || d.version !== SAVE_VERSION) return null;
   const { hero: h, items, progress: p } = d;
   if (!isObj(h) || !isObj(items) || !isObj(p)) return null;
@@ -148,23 +118,9 @@ export function parseSave(raw: string | null): SaveData | null {
   }
 
   if (!isInt(d.gold, 0, 9_999_999)) return null;
-  if (!MAP_IDS.includes(p.map as MapId)) return null;
-  const map = MAPS[p.map as MapId];
-  if (!isInt(p.x, 0, map.rows[0].length - 1) || !isInt(p.y, 0, map.rows.length - 1)) return null;
-  if (!["up", "down", "left", "right"].includes(p.facing as string)) return null;
-  if (typeof p.checkpoint !== "string" || !(p.checkpoint in CHECKPOINTS)) return null;
-  const defeated = idList(p.defeated, (x) => enemyIds.has(x));
-  const claimed = idList(p.claimed, (x) => claimIds.has(x));
-  if (!defeated || !claimed) return null;
-  const q = p.quest;
-  if (!isObj(q) || !QUEST_STATES.includes(q.state as QuestState)) return null;
-  const kills = idList(q.kills, (x) => defeated.includes(x));
-  if (!kills || kills.length > 3) return null;
-  // Cross-field invariants keep a hand-edited save from skipping or repeating quest steps.
-  const state = q.state as QuestState;
-  if ((state === "AVAILABLE" && kills.length) || (state === "ACTIVE" && kills.length >= 3)) return null;
-  if ((state === "READY_TO_TURN_IN" || state === "COMPLETED") && kills.length !== 3) return null;
-  if ((state === "COMPLETED") !== claimed.includes(QUEST_REWARD_ID)) return null;
+  const path = p.path;
+  if (!Array.isArray(path) || path.length > 16 || !path.every((x) => typeof x === "string") || !validPath(path as string[])) return null;
+  if (!isInt(p.wins, 0, 1e6)) return null;
   const t = d.trade;
   if (!isObj(t) || !isInt(t.seq, 0, 1e9) || !isObj(t.kael)) return null;
   const stock = t.kael as Record<string, unknown>;
@@ -191,16 +147,7 @@ export function parseSave(raw: string | null): SaveData | null {
     },
     items: bag,
     gold: d.gold,
-    progress: {
-      map: p.map as MapId,
-      x: p.x,
-      y: p.y,
-      facing: p.facing as Dir,
-      checkpoint: p.checkpoint as CheckpointId,
-      defeated,
-      claimed,
-      quest: { state, kills },
-    },
+    progress: { path: [...(path as string[])], wins: p.wins },
     trade: { seq: t.seq, kael },
     savedAt: d.savedAt,
   };
@@ -220,14 +167,9 @@ function dropShop(d: Record<string, unknown>): Record<string, unknown> {
   return { ...rest, items, version: 3 };
 }
 
-/** v1 saves (creation-only slice) had no world yet: keep the hero, start at the village. */
+/** v1 saves (creation-only slice) had no journey yet: keep the hero, start the route. */
 function migrateV1(d: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...d,
-    version: 2,
-    gold: 0,
-    progress: { ...START, facing: "down", checkpoint: "oakheart_square", defeated: [], claimed: [], quest: { state: "AVAILABLE", kills: [] } },
-  };
+  return { ...d, version: 5, gold: 0, progress: freshProgress(), trade: freshTrade() };
 }
 
 export function parseSettings(raw: string | null): Settings {
@@ -237,7 +179,6 @@ export function parseSettings(raw: string | null): Settings {
       return {
         autoTiming: d.autoTiming === true,
         reducedMotion: d.reducedMotion === true,
-        lighting: d.lighting !== false,
       };
   } catch {
     /* fall through to defaults */

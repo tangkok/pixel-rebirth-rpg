@@ -3,7 +3,7 @@
 // the next trade id so a double tap or a replayed confirm can never apply twice.
 import { ITEMS, type ItemId } from "./data";
 import type { SaveData } from "./save";
-import { GOLD_CAP, ITEM_CAP } from "./world";
+import { GOLD_CAP, ITEM_CAP } from "./route";
 
 export const KAEL = "npc_adventurer_kael";
 /**

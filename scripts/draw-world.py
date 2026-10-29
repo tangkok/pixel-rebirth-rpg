@@ -1,8 +1,8 @@
 """Draw the original 16x16 world tileset and the Forest Wolf sprite for Echoes of Astra.
 
 Usage: python3 -I scripts/draw-world.py
-Writes public/astra/world/tiles.png (one row of 16px tiles, order = TILES below, which
-src/astra/world.ts mirrors) and public/astra/world/wolf.png (32x24 frames, WOLF_POSES order).
+Writes public/astra/world/wolf.png (32x24 frames, WOLF_POSES order) and battle_forest.png.
+(The map tiles it still builds are unused since the route replaced the walking map.)
 Pixel art is generated from a fixed seed so reruns give identical files. Requires Pillow.
 """
 import random
@@ -640,10 +640,8 @@ def main() -> None:
     sheet = Image.new("RGBA", (T * len(every), T))
     for i, img in enumerate(every):
         sheet.paste(img, (T * i, 0))
-    sheet.save(OUT / "tiles.png", optimize=True)
     wolf.save(OUT / "wolf.png", optimize=True)
     battle.save(OUT / "battle_forest.png", optimize=True)
-    fountain().save(OUT / "fountain.png", optimize=True)
     print(" ".join(name for name, _ in TILES + TOWN_TILES))
 
 

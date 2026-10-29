@@ -454,58 +454,96 @@ footer.row {
   }
 }
 
-/* ---------- exploration ---------- */
-.world {
+/* ---------- journey: route map ---------- */
+.journey {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  padding: 4.6em 0.5em 0.5em;
   overflow: hidden;
-  border-radius: 10px;
-  background: #0b1426;
+  background: radial-gradient(ellipse at 50% 30%, #1d3a2f, #0b1426 75%);
 }
-.world-canvas {
-  position: absolute;
-  left: 0;
-  top: 0;
-  image-rendering: pixelated;
+.route-wrap {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  width: min(100%, 26em);
+  margin-inline: auto;
 }
-.no-fx .world-glow,
-.no-fx .world-shade,
-.no-fx .dof {
-  display: none;
-}
-.world-glow {
-  position: absolute;
-  left: 0;
-  top: 0;
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-/* Colour grade: cool sky at the top, warm golden ground below, darker edges. */
-.world-shade {
+.route-lines {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  mix-blend-mode: multiply;
-  background:
-    radial-gradient(ellipse at center, transparent 45%, rgb(15 8 25 / 0.62) 100%),
-    linear-gradient(#c4acd6, #ffe7c6 50%, #e2ad78);
+  width: 100%;
+  height: 100%;
 }
-.world[data-map="whispering_forest"] .world-shade {
-  background:
-    radial-gradient(ellipse at center, transparent 45%, rgb(15 8 25 / 0.6) 100%),
-    linear-gradient(#9fc4bd, #e8f0d2 50%, #b9cf9a);
+.route-lines line {
+  stroke: #ffffff30;
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
 }
-/* Tilt-shift depth of field over the top and bottom of the map, as in HD-2D. */
-.dof {
-  position: absolute;
-  inset-inline: 0;
-  height: 18%;
-  pointer-events: none;
-  -webkit-backdrop-filter: blur(1.4px);
-  backdrop-filter: blur(1.4px);
+.route-lines line.taken {
+  stroke: var(--gold);
+  stroke-dasharray: none;
 }
-.dof.top { top: 0; mask-image: linear-gradient(#000, transparent); -webkit-mask-image: linear-gradient(#000, transparent); }
-.dof.bottom { bottom: 0; mask-image: linear-gradient(transparent, #000); -webkit-mask-image: linear-gradient(transparent, #000); }
+.route-lines line.open {
+  stroke: #fff8e0;
+}
+.route {
+  position: relative;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.route-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: center;
+  justify-items: center;
+  min-height: 0;
+}
+.node {
+  display: grid;
+  place-items: center;
+  height: min(3.4em, 96%);
+  aspect-ratio: 1;
+  font-size: 1.1em;
+  line-height: 1;
+}
+.node small {
+  font-size: 0.5em;
+  max-width: 7em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.node:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.node.done,
+.node.here {
+  opacity: 1;
+  filter: saturate(0.6);
+}
+.node.open {
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+.node.boss {
+  height: min(4.2em, 100%);
+}
+/* Glow, not scale: a moving box would never settle for a tap target check. */
+@keyframes pulse {
+  to {
+    filter: brightness(1.4);
+  }
+}
+.reduced .node.open {
+  animation: none;
+}
 .hud {
   position: absolute;
   inset: 0.4em 0.4em auto;
@@ -549,37 +587,6 @@ footer.row {
 }
 .toast.on {
   opacity: 1;
-}
-.pad {
-  position: absolute;
-  left: 0.5em;
-  bottom: 0.5em;
-  display: grid;
-  grid-template: ". u ." 48px "l . r" 48px ". d ." 48px / 48px 48px 48px;
-  gap: 2px;
-  touch-action: none;
-}
-.pad .btn {
-  padding: 0;
-  min-width: 48px;
-  background: #1b2c4ccc;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.pad-up { grid-area: u; }
-.pad-down { grid-area: d; }
-.pad-left { grid-area: l; }
-.pad-right { grid-area: r; }
-.act {
-  position: absolute;
-  right: 0.7em;
-  bottom: 1.2em;
-  min-width: 76px;
-  min-height: 76px;
-  border-radius: 50%;
-}
-.act[hidden] {
-  display: none;
 }
 .talk {
   position: absolute;
@@ -826,19 +833,6 @@ footer.row {
   padding: 0.1em 0.9em;
   background: #0b1426cc;
 }
-@media (max-height: 420px) {
-  .pad {
-    grid-template: ". u ." 44px "l . r" 44px ". d ." 44px / 44px 44px 44px;
-  }
-  .pad .btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .act {
-    min-width: 64px;
-    min-height: 64px;
-  }
-}
 
 /* ---------- UI skin: Dark Ages UI by Hypnobius (cut pieces in ui/, scripts/import-ui.py) ----------
    9-slice border images at whole-pixel scales: buttons 2×, frames 1×. */
@@ -872,21 +866,16 @@ footer.row {
   color: #fff8e0;
 }
 .cycle .btn,
-.pad .btn,
 .menu-btn,
-.act {
+.node {
   border-width: 16px;
   border-image: url("./ui/slot.png") 8 fill / 16px;
   padding: 0;
 }
-.act {
+.node.open,
+.node.here {
   border-image-source: url("./ui/slot-on.png");
-  border-radius: 0;
   color: var(--gold);
-}
-.pad .btn {
-  background: none;
-  opacity: 0.92;
 }
 .dialog,
 .talk,

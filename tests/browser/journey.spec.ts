@@ -1,0 +1,197 @@
+import { expect, test, type Page } from "@playwright/test";
+import { lootOf } from "../../src/astra/route";
+import type { SaveData } from "../../src/astra/save";
+
+const SIZES = [
+  { name: "phone portrait", width: 375, height: 667 },
+  { name: "phone landscape", width: 667, height: 375 },
+  { name: "tiny landscape", width: 568, height: 320 },
+  { name: "desktop", width: 1440, height: 900 },
+];
+
+async function expectNoScroll(page: Page) {
+  const m = await page.evaluate(() => {
+    const d = document.documentElement;
+    const offscreen = [...document.querySelectorAll<HTMLElement>("button")]
+      .filter((el) => el.offsetParent !== null)
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5;
+      })
+      .map((el) => el.textContent);
+    return { sw: d.scrollWidth, cw: d.clientWidth, sh: d.scrollHeight, ch: d.clientHeight, offscreen };
+  });
+  expect(m.sw).toBeLessThanOrEqual(m.cw);
+  expect(m.sh).toBeLessThanOrEqual(m.ch);
+  expect(m.offscreen).toEqual([]);
+}
+
+const route = (page: Page) => page.locator("main.journey");
+const node = (page: Page, id: string) => page.locator(`.node[data-node="${id}"]`);
+const saved = (page: Page): Promise<SaveData> => page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!));
+
+async function newHero(page: Page) {
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.locator("#hero-name").fill("Tang");
+  const next = page.getByRole("button", { name: "ถัดไป", exact: true });
+  await next.click();
+  await page.getByRole("button", { name: "Berserk" }).click();
+  await next.click();
+  await next.click();
+  await page.locator(".draw .btn").click();
+  await expect(page.locator(".slot.landed")).toHaveCount(1);
+  await next.click();
+  await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await expect(route(page)).toHaveAttribute("data-node", "start");
+}
+/** Edits the stored save, then continues from the title so the journey reloads it. */
+async function patch(page: Page, fn: string) {
+  await page.evaluate((src) => {
+    const s = JSON.parse(localStorage.getItem("echoes-of-astra-save")!);
+    new Function("s", src)(s);
+    localStorage.setItem("echoes-of-astra-save", JSON.stringify(s));
+  }, fn);
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+}
+/** Wins the duel on screen: potion when low, skill when affordable, else attack. */
+async function winDuel(page: Page) {
+  await expect(page.locator(".encounter")).toBeVisible();
+  const back = page.getByRole("button", { name: "กลับสู่เส้นทาง" });
+  for (let turn = 0; turn < 80 && !(await back.isVisible()); turn++) {
+    const skip = page.getByRole("button", { name: "ข้าม ⏭" });
+    if (await skip.isVisible()) await skip.click();
+    const cmds = page.locator(".cmds button:not(:disabled)");
+    await expect(cmds.first()).toBeVisible();
+    if (await back.isVisible()) break;
+    const cur = Number(await page.locator(".fe-side.hero .fe-hp-num").textContent());
+    const item = page.getByRole("button", { name: "Item ไอเทม" });
+    if (cur < 60 && (await item.isEnabled())) {
+      await item.click();
+      const potion = page.getByRole("button", { name: /^Potion/ });
+      if (await potion.isEnabled()) {
+        await potion.click();
+        continue;
+      }
+      await page.getByRole("button", { name: "กลับ", exact: true }).click();
+    }
+    const skill = page.locator(".cmds button").nth(1);
+    await ((await skill.isEnabled()) ? skill : page.getByRole("button", { name: "Attack โจมตี" })).dblclick(); // double tap = one action
+  }
+  await back.click();
+  await expect(route(page)).toBeVisible();
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/astra/");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+});
+
+test("a fight, a chest and a rest each apply once and survive a reload", async ({ page }) => {
+  await newHero(page);
+  await expect(node(page, "r2a")).toBeDisabled(); // only the start row is open
+  await node(page, "r1a").click();
+  await winDuel(page);
+  await expect(route(page)).toHaveAttribute("data-node", "r1a");
+  const gold = lootOf("forest_wolf", "r1a")!.gold;
+  await expect(page.locator(".hud-stats")).toContainText(`${gold} G`);
+  await expect(node(page, "r1b")).toBeDisabled(); // the other branch is closed now
+
+  await node(page, "r2a").dblclick(); // chest: double tap = one chest
+  await expect(page.locator(".toast")).toContainText("Potion ×1");
+  let s = await saved(page);
+  expect(s.progress.path).toEqual(["r1a", "r2a"]);
+  expect(s.items.wolf_pelt).toBe(1);
+
+  await patch(page, "s.hero.hp = 1;");
+  await node(page, "r3a").click();
+  await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
+  await page.getByRole("button", { name: "เริ่มเส้นทางใหม่" }).click(); // lost at 1 HP
+  await expect(route(page)).toHaveAttribute("data-node", "start");
+  s = await saved(page);
+  expect(s.progress.path).toEqual([]);
+  expect(s.gold).toBe(gold); // loot and items stay
+  const [hp, max] = (await page.locator(".hud-stats").textContent())!.match(/HP (\d+)\/(\d+)/)!.slice(1).map(Number);
+  expect(hp).toBe(max);
+});
+
+test("Kael trades on his node and the trade survives a reload", async ({ page }) => {
+  await newHero(page);
+  await patch(page, "s.gold = 100; s.items.wolf_pelt = 2; s.progress.path = ['r1b', 'r2c'];");
+  await node(page, "r3b").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Kael");
+  await expectNoScroll(page);
+  await page.getByRole("button", { name: "Buy ซื้อ" }).click();
+  await expect(dialog).toContainText("Kael มี 3");
+  await page.getByRole("button", { name: "ซื้อ Wolf Pelt ×1" }).dblclick(); // double tap = one trade
+  await expect(dialog).toContainText("Kael มี 2");
+  await page.getByRole("button", { name: "กลับ", exact: true }).click();
+  await page.getByRole("button", { name: "Leave ไปก่อน" }).click();
+  await expect(dialog).toBeHidden();
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator(".hud-stats")).toContainText("76 G");
+  const s = await saved(page);
+  expect([s.items.wolf_pelt, s.trade.kael.wolf_pelt, s.progress.path.at(-1)]).toEqual([3, 2, "r3b"]);
+});
+
+test("beating the boss ends the journey and a new one keeps the hero", async ({ page }) => {
+  test.setTimeout(180_000); // the boss takes many turns
+  await newHero(page);
+  await patch(page, "s.hero.level = 3; s.hero.exp = 80; s.items.potion = 9; s.progress.path = ['r1b', 'r2c', 'r3b', 'r4c', 'r5b'];");
+  await node(page, "boss").click();
+  await winDuel(page);
+  await expect(page.getByRole("dialog")).toContainText("ผ่านการเดินทาง");
+  await page.getByRole("button", { name: "ออกเดินทางใหม่" }).click();
+  await expect(route(page)).toHaveAttribute("data-node", "start");
+  const s = await saved(page);
+  expect(s.progress).toEqual({ path: [], wins: 1 });
+  expect(s.hero.level).toBe(3);
+});
+
+for (const size of SIZES) {
+  test(`route, dialog and duel fit without scrolling: ${size.name}`, async ({ page }) => {
+    await page.setViewportSize(size);
+    await newHero(page);
+    await expectNoScroll(page);
+    await page.getByRole("button", { name: "เมนู" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectNoScroll(page);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await node(page, "r1a").click();
+    await expect(page.locator(".encounter")).toBeVisible();
+    await expect(page.locator(".intent")).toContainText("Bite");
+    await expectNoScroll(page);
+    await page.getByRole("button", { name: "Attack โจมตี" }).click();
+    await expectNoScroll(page); // mid-playback, skip button showing
+    await page.setViewportSize({ width: size.height, height: size.width }); // rotate mid-fight
+    await expectNoScroll(page);
+  });
+}
+
+test("a well-timed tap scores Perfect/Good and fills Astra; a missed cue counts as Normal", async ({ page }) => {
+  await newHero(page);
+  await node(page, "r1a").click();
+  await expect(page.locator(".encounter")).toBeVisible();
+  // Press Space in-page exactly when the ring meets its target (700 ms after the cue appears).
+  const timed = page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        const mo = new MutationObserver(() => {
+          if (!document.querySelector(".cue.strike")) return;
+          mo.disconnect();
+          setTimeout(() => (dispatchEvent(new KeyboardEvent("keydown", { key: " " })), done()), 700);
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+      }),
+  );
+  await page.getByRole("button", { name: "Attack โจมตี" }).click();
+  await timed;
+  await expect(page.locator(".cue.guard")).toBeVisible(); // wolf's turn: guard cue, left to time out
+  await expect(page.locator(".cmds button:not(:disabled)").first()).toBeVisible({ timeout: 10_000 });
+  // Strike Perfect (+15) or Good (+10), then the faster wolf acts twice, each untimed guard Normal (+3).
+  await expect(page.locator(".fe-astra")).toHaveAttribute("aria-valuetext", /^(21|16)\/100$/);
+});

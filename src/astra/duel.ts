@@ -25,7 +25,7 @@ import { ANIMS, FRAME_H, FRAME_W, type Anim } from "./looks";
 import { heroFrame, heroMove, impactAt, keyAt, MOVES, moveLength, releaseAt, WOLF_POSES, type Key, type MoveKind, type WolfPose } from "./moves";
 import type { SaveData } from "./save";
 import { button, composite, crisp, h, settings, show, still } from "./ui";
-import { expFor } from "./world";
+import { expFor } from "./route";
 
 const STEP_MS = 520;
 /** The shrinking ring meets the target this long after the cue appears; input closes LATE_MS after. */
@@ -374,8 +374,8 @@ export function duel(
   }
   function result() {
     const win = b.over === "win";
-    log.textContent = win ? `ชนะ! ได้รับ ${expFor(enemy, b.talentId)} EXP` : "พ่ายแพ้… กลับไปยังจุดเซฟล่าสุด";
-    cmds.replaceChildren(button(win ? "กลับสู่แผนที่" : "กลับไปจุดเซฟ", () => done(b), { class: "primary", autofocus: true }));
+    log.textContent = win ? `ชนะ! ได้รับ ${expFor(enemy, b.talentId)} EXP` : "พ่ายแพ้… การเดินทางต้องเริ่มใหม่";
+    cmds.replaceChildren(button(win ? "กลับสู่เส้นทาง" : "เริ่มเส้นทางใหม่", () => done(b), { class: "primary", autofocus: true }));
     cmds.querySelector("button")?.focus({ preventScroll: true });
   }
 
