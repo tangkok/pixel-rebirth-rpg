@@ -120,7 +120,7 @@ export function heroSprite(look: Look, classId: ClassId, label: string) {
 
 /** Integer pixel scale so the 100×40 frame stays crisp and fits its box. */
 export function fitSprites() {
-  for (const box of root.querySelectorAll<HTMLElement>(".sprite-box:not(.duel)")) {
+  for (const box of root.querySelectorAll<HTMLElement>(".sprite-box")) {
     const k = Math.max(1, Math.floor(Math.min(box.clientWidth / 100, box.clientHeight / 40)));
     box.style.setProperty("--k", String(k));
   }

@@ -327,6 +327,84 @@ def wolf_frames() -> Image.Image:
     return sheet
 
 
+def battle_forest() -> Image.Image:
+    """240x136 side-view Whispering Forest duel backdrop with a raised earth platform."""
+    W, H = 240, 136
+    img = Image.new("RGBA", (W, H))
+    sky = ["#16304a", "#1d3f5c", "#26506c", "#356a7c", "#4f8a86"]
+    for y in range(H):  # banded sky with ordered dither between bands
+        band = min(len(sky) - 1, y * len(sky) // 70)
+        nxt = min(len(sky) - 1, band + 1)
+        frac = (y * len(sky) / 70) % 1
+        for x in range(W):
+            px(img, x, y, sky[nxt] if frac > 0.5 and (x + y) % 2 else sky[band])
+    # light shafts through the canopy
+    for sx in (40, 120, 190):
+        for y in range(0, 90):
+            for x in range(sx + y // 3, sx + y // 3 + 6):
+                if (x + y) % 3 == 0:
+                    px(img, x, y, "#6fa58f")
+
+    def trunks(color, dark, count, top, width, seed):
+        r = random.Random(seed)
+        for i in range(count):
+            x0 = r.randrange(-10, W)
+            w = r.randrange(width - 2, width + 3)
+            for x in range(x0, x0 + w):
+                for y in range(top, 100):
+                    px(img, x, y, dark if x in (x0, x0 + w - 1) or (x - x0) * 3 > w * 2 else color)
+            # canopy blob
+            cx, cy, cr = x0 + w // 2, top + 4, w + 8
+            for x in range(cx - cr, cx + cr):
+                for y in range(cy - cr // 2 - 6, cy + cr // 2):
+                    if ((x - cx) / cr) ** 2 + ((y - cy) / (cr * 0.6)) ** 2 <= 1 and r.random() > 0.05:
+                        px(img, x, y, dark if y > cy + 2 else color)
+
+    trunks("#24453f", "#1a3330", 9, 18, 7, 1)  # far layer
+    trunks("#2f5a3c", "#1d3a2a", 6, 6, 11, 2)  # near layer
+    # overhead canopy band and ground bushes frame the clearing
+    r = random.Random(3)
+    for x in range(W):
+        depth = 8 + int(5 * abs(((x / 37.0) % 2) - 1)) + r.randrange(3)
+        for y in range(depth):
+            px(img, x, y, "#1d3a2a" if y < depth - 2 else ("#2f5a3c" if (x + y) % 2 else "#1d3a2a"))
+    for cx in (8, 60, 150, 228):
+        for x in range(cx - 14, cx + 14):
+            for y in range(84, 97):
+                d = ((x - cx) / 14) ** 2 + ((y - 97) / 12) ** 2
+                if d <= 1:
+                    px(img, x, y, "#2f6b3a" if d > 0.55 or (x + y) % 3 else "#4f9a4a")
+                elif d <= 1.12 and y < 96:
+                    px(img, x, y, INK)
+    # ground strip
+    for y in range(96, H):
+        for x in range(W):
+            px(img, x, y, "#2f5a2c" if (x * 7 + y * 3) % 11 else "#3f7a3a")
+    for x in range(W):  # grass fringe
+        h = 1 + (x * 5 % 3)
+        for y in range(96 - h, 97):
+            px(img, x, y, "#4f9a4a")
+    # raised earth platform (trapezoid) where the duel happens
+    top, bottom = 100, 126
+    for y in range(top, bottom):
+        inset = (bottom - y) // 2
+        for x in range(14 + inset, W - 14 - inset):
+            edge = y in (top, top + 1)
+            c = "#c79a5b" if edge else ("#a0713f" if (x // 6 + y // 3) % 2 else "#94673a")
+            px(img, x, y, c)
+        px(img, 13 + inset, y, INK)
+        px(img, W - 14 - inset, y, INK)
+    for x in range(14 + (bottom - top) // 2, W - 14 - (bottom - top) // 2):
+        px(img, x, top - 1, INK)
+    for y in range(bottom, bottom + 4):  # front face
+        for x in range(14, W - 14):
+            px(img, x, y, "#7a5230" if y < bottom + 3 else INK)
+    for _ in range(40):  # pebbles
+        x, y = rng.randrange(30, W - 30), rng.randrange(top + 3, bottom - 2)
+        px(img, x, y, D3)
+    return img
+
+
 TILES = [
     ("grass", lambda: grass()),
     ("grass_tuft", lambda: grass(True)),
@@ -360,6 +438,7 @@ def main() -> None:
         sheet.paste(make(), (T * i, 0))
     sheet.save(OUT / "tiles.png", optimize=True)
     wolf_frames().save(OUT / "wolf.png", optimize=True)
+    battle_forest().save(OUT / "battle_forest.png", optimize=True)
     print(" ".join(name for name, _ in TILES))
 
 

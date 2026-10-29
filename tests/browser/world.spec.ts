@@ -61,8 +61,7 @@ async function fight(page: Page, key: keyof typeof KEY) {
     const cmds = page.locator(".cmds button:not(:disabled)");
     await expect(cmds.first()).toBeVisible();
     if (await back.isVisible()) break;
-    const hp = await page.locator(".bar span").first().textContent();
-    const [cur] = hp!.match(/\d+/g)!.map(Number);
+    const cur = Number(await page.locator(".fe-side.hero .fe-hp-num").textContent());
     const item = page.getByRole("button", { name: "Item ไอเทม" });
     if (cur < 60 && (await item.isEnabled())) {
       await item.click();
