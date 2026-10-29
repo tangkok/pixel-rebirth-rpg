@@ -105,7 +105,7 @@ export function duel(
     const aura = (x: number) => {
       ctx.fillStyle = "#8fd3ff55";
       ctx.beginPath();
-      ctx.ellipse(x, FOOT - 22, 22, 30, 0, 0, Math.PI * 2);
+      ctx.ellipse(x, FOOT - 12, 14, 18, 0, 0, Math.PI * 2);
       ctx.fill();
     };
     if (b.hero.defending) aura(64);
@@ -121,13 +121,13 @@ export function duel(
     const frameNo = calm ? 0 : Math.floor(now / (striking ? 80 : 120));
     if (heroSheet) {
       const anim = ANIMS[striking ? "run" : "idle"];
-      // Heroes99 body feet sit at (41, 34) in the 100x40 frame; drawn at 2x.
+      // Heroes99 body feet sit at (41, 34) in the 100x40 frame; drawn 1:1 like a GBA battle sprite.
       sprite("hero", () =>
-        ctx.drawImage(heroSheet!, (frameNo % anim.frames) * FRAME_W, anim.row * FRAME_H, FRAME_W, FRAME_H, 64 - 82 + off("hero"), FOOT - 68, FRAME_W * 2, FRAME_H * 2),
+        ctx.drawImage(heroSheet!, (frameNo % anim.frames) * FRAME_W, anim.row * FRAME_H, FRAME_W, FRAME_H, 64 - 41 + off("hero"), FOOT - 34, FRAME_W, FRAME_H),
       );
     }
     if (wolfImg.complete && wolfImg.naturalWidth)
-      sprite("foe", () => ctx.drawImage(wolfImg, (calm ? 0 : Math.floor(now / 420) % 2) * 32, 0, 32, 24, 176 - 32 + off("foe"), FOOT - 46, 64, 48));
+      sprite("foe", () => ctx.drawImage(wolfImg, (calm ? 0 : Math.floor(now / 420) % 2) * 32, 0, 32, 24, 176 - 16 + off("foe"), FOOT - 23, 32, 24));
     requestAnimationFrame(draw);
   };
 

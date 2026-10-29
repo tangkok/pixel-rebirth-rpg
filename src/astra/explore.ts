@@ -309,8 +309,9 @@ export function explore(start: SaveData, toTitle: (notice?: string) => void, not
   let vh = 1;
   function resize() {
     const r = main.getBoundingClientRect();
-    // Integer zoom so 16px tiles stay crisp; at least ~11x9 tiles stay visible.
-    scale = Math.max(1, Math.min(4, Math.floor(Math.min(r.width / (11 * TILE), r.height / (9 * TILE)))));
+    // Whole device pixels per art pixel, capped at 6 so the art stays fine-grained on big screens.
+    const dpr = devicePixelRatio || 1;
+    scale = Math.max(1, Math.min(6, Math.floor(Math.min((r.width * dpr) / (14 * TILE), (r.height * dpr) / (10 * TILE))))) / dpr;
     vw = Math.ceil(r.width / scale);
     vh = Math.ceil(r.height / scale);
     crisp(canvas, vw, vh, scale);
