@@ -2,12 +2,12 @@
 // area + difficulty), pick the next event from cards, a victory summary after each fight, and a
 // run summary when the journey ends. Game rules live in route.ts and town.ts, and every committed
 // change goes through commit() so it is saved atomically.
-import { CLASSES, DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, HONE_MAX, HONE_PER, honeCost, ITEMS, LEVEL_EXP, PADDOCK, PET_IDS, PET_MAX_LEVEL, petBite, petLevel, PETS, RECIPES, STAT_IDS, STAT_LABEL, TRAIN, TRAIN_CAP, TRAIN_IDS, type DifficultyId, type ItemId, type StatId } from "./data";
+import { ARMOR_IDS, ARMORS, CLASSES, DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, HONE_MAX, HONE_PER, honeCost, ITEMS, LEVEL_EXP, PADDOCK, RARITY_ODDS, PET_IDS, PET_MAX_LEVEL, petBite, petLevel, PETS, RECIPES, STAT_IDS, STAT_LABEL, TRAIN, TRAIN_CAP, TRAIN_IDS, type DifficultyId, type ItemId, type StatId } from "./data";
 import { duel } from "./duel";
 import { heroMax } from "./hero";
 import { choices, recordVictory, restartRun, rewardOf, ROUTE, ROUTE_ROWS, runSummary, startRun, visit, type NodeKind } from "./route";
 import { writeSave, type SaveData } from "./save";
-import { bring, craft, hatch, hone, pointsLeft, release, resetTraining, train, type Change } from "./town";
+import { bring, craft, forgeArmor, hatch, hone, pointsLeft, release, resetTraining, train, wear, type Change } from "./town";
 import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
 import { button, fitSprites, h, heroSprite, show, store } from "./ui";
 
@@ -45,7 +45,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
   /** The town shows until the hero departs; a journey in progress opens on its route cards. */
   let departed = save.progress.path.length > 0;
   let view: View = "town";
-  let smithTab: "hone" | "craft" = "hone";
+  let smithTab: "hone" | "armor" | "craft" = "hone";
   let farmTab: "pets" | "eggs" = "pets";
   let esc: () => void = () => void 0;
   const life = new AbortController();
@@ -238,8 +238,8 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     const tabs = h(
       "div",
       { class: "tabs row", role: "group" },
-      ...(["hone", "craft"] as const).map((t) =>
-        button(t === "hone" ? "ตีบวก" : "หัตถกรรม", () => ((smithTab = t), draw()), { class: smithTab === t ? "on" : "", aria: { pressed: String(smithTab === t) } }),
+      ...(["hone", "armor", "craft"] as const).map((t) =>
+        button({ hone: "ตีบวก", armor: "ชุดเกราะ", craft: "หัตถกรรม" }[t], () => ((smithTab = t), draw()), { class: smithTab === t ? "on" : "", aria: { pressed: String(smithTab === t) } }),
       ),
     );
     const have = `มี ${save.gold} Gold · Wolf Pelt ×${save.items.wolf_pelt}`;
@@ -266,7 +266,35 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
           }),
         ),
       ];
-    } else
+    } else if (smithTab === "armor")
+      content = ARMOR_IDS.map((id) => {
+        const a = ARMORS[id];
+        const owned = save.hero.armors.includes(id);
+        const worn = save.hero.armor === id;
+        const stats = (Object.entries(a.stats) as [StatId, number][]).map(([st, n]) => `${STAT_LABEL[st]} +${n}`).join(" · ");
+        const c = a.cost;
+        return h(
+          "div",
+          { class: `trow armor ${a.rarity}${worn ? " with" : ""}` },
+          h(
+            "div",
+            {},
+            h("b", {}, a.name),
+            h("small", { class: "rarity" }, `${RARITY_ODDS.find((r) => r.rarity === a.rarity)!.thai}${worn ? " · สวมใส่อยู่" : owned ? " · มีแล้ว" : ""}`),
+            h("small", { class: "gain" }, stats),
+            !owned && c && h("small", { class: "next" }, `หลอม: ${c.gold} Gold · Wolf Pelt ×${c.wolf_pelt}`),
+          ),
+          worn
+            ? button("สวมอยู่", () => void 0, { disabled: true, aria: { label: `${a.name} สวมอยู่` } })
+            : owned
+              ? button("สวมใส่", () => act(`armor:${id}`, wear(save, id), `สวม ${a.name}`), { class: "primary", aria: { label: `สวม ${a.name}` } })
+              : button("หลอม", () => act(`armor:${id}`, forgeArmor(save, id), `หลอม ${a.name} แล้ว`), {
+                  disabled: !c || save.gold < c.gold || save.items.wolf_pelt < c.wolf_pelt,
+                  aria: { label: `หลอม ${a.name}` },
+                }),
+        );
+      });
+    else
       content = (Object.entries(RECIPES) as [ItemId, { wolf_pelt: number; gold: number }][]).map(([it, r]) =>
         h(
           "div",

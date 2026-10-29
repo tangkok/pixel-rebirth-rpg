@@ -5,7 +5,10 @@ import {
   GENDERS,
   HONE_MAX,
   ITEMS,
+  ARMOR_IDS,
+  type ArmorId,
   MAX_LEVEL,
+  STARTER_ARMOR,
   PADDOCK,
   PET_IDS,
   type PetId,
@@ -43,6 +46,9 @@ export interface SaveData {
     train: Training;
     /** Blacksmith hone level of the class weapon, 0 to HONE_MAX. */
     hone: number;
+    /** Armour worn, and every set owned (forged at the blacksmith; the tunic is the start). */
+    armor: ArmorId;
+    armors: ArmorId[];
   };
   items: Record<ItemId, number>;
   gold: number;
@@ -81,10 +87,10 @@ export function newSave(
   look: Look,
 ): SaveData {
   const train = noTraining();
-  const s = heroMax({ classId, talentId, level: 1, train, hone: 0 });
+  const s = heroMax({ classId, talentId, level: 1, train, hone: 0, armor: STARTER_ARMOR });
   return {
     version: SAVE_VERSION,
-    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0 },
+    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0, armor: STARTER_ARMOR, armors: [STARTER_ARMOR] },
     items: { ...STARTING_ITEMS },
     gold: 0,
     progress: freshProgress(),
@@ -141,7 +147,13 @@ export function parseSave(raw: string | null): SaveData | null {
   if (Object.values(train).reduce((a, n) => a + n, 0) > h.level - 1) return null;
   const hone = h.hone ?? 0;
   if (!isInt(hone, 0, HONE_MAX)) return null;
-  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone });
+  // Saves from before armour wore the tunic.
+  const armors = h.armors ?? [STARTER_ARMOR];
+  if (!Array.isArray(armors) || !armors.length || armors.length > ARMOR_IDS.length || new Set(armors).size !== armors.length) return null;
+  if (!armors.every((a) => ARMOR_IDS.includes(a as ArmorId))) return null;
+  const armor = h.armor ?? STARTER_ARMOR;
+  if (!armors.includes(armor)) return null;
+  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone, armor: armor as ArmorId });
   if (!isInt(h.hp, 0, max.maxHp) || !isInt(h.mp, 0, max.maxMp)) return null;
 
   const itemIds = Object.keys(ITEMS) as ItemId[];
@@ -186,6 +198,8 @@ export function parseSave(raw: string | null): SaveData | null {
       mp: h.mp,
       train,
       hone,
+      armor: armor as ArmorId,
+      armors: [...(armors as ArmorId[])],
     },
     items: bag,
     gold: d.gold,

@@ -3,7 +3,7 @@ import { startBattle } from "../src/astra/battle";
 import { LEVEL_EXP, MAX_LEVEL } from "../src/astra/data";
 import { heroMax } from "../src/astra/hero";
 import { defaultLook } from "../src/astra/looks";
-import { craft, hone, pointsLeft, resetTraining, train } from "../src/astra/town";
+import { craft, forgeArmor, hone, pointsLeft, resetTraining, train, wear } from "../src/astra/town";
 import { newSave, parseSave, type SaveData } from "../src/astra/save";
 
 const at = (level: number, extra: (s: SaveData) => void = () => {}): SaveData => {
@@ -70,5 +70,30 @@ describe("blacksmith", () => {
     expect([c.gold, c.items.wolf_pelt, c.items.potion]).toEqual([0, 0, s.items.potion + 1]);
     expect(craft(c, "potion")).toEqual({ ok: false, why: "Gold ไม่พอ" });
     expect(craft(s, "wolf_pelt").ok).toBe(false);
+  });
+});
+
+describe("armour", () => {
+  it("a new hero wears the plain tunic with its ordinary stats", () => {
+    const s = at(1);
+    expect([s.hero.armor, s.hero.armors, s.hero.look.outfit]).toEqual(["tunic", ["tunic"], 16]);
+    expect(heroMax(s.hero).def).toBe(heroMax({ ...s.hero, armor: "tunic" }).def);
+  });
+  it("forges a set once for Pelts and Gold, then wearing it changes stats and outfit", () => {
+    const s = at(1, (x) => ((x.gold = 50), (x.items.wolf_pelt = 3)));
+    const f = ok(forgeArmor(s, "hunter"));
+    expect([f.gold, f.items.wolf_pelt, f.hero.armors]).toEqual([10, 0, ["tunic", "hunter"]]);
+    expect(forgeArmor(f, "hunter").ok).toBe(false);
+    const w = ok(wear(f, "hunter"));
+    expect(w.hero.look.outfit).toBe(11);
+    expect(heroMax(w.hero).spd).toBeGreaterThan(heroMax(f.hero).spd);
+    expect(wear(s, "plate").ok).toBe(false);
+  });
+  it("save rejects wearing an unowned set and loads pre-armour saves in the tunic", () => {
+    expect(parseSave(JSON.stringify(at(1, (x) => (x.hero.armor = "plate"))))).toBeNull();
+    const old = JSON.parse(JSON.stringify(at(1)));
+    delete old.hero.armor;
+    delete old.hero.armors;
+    expect(parseSave(JSON.stringify(old))?.hero).toMatchObject({ armor: "tunic", armors: ["tunic"] });
   });
 });

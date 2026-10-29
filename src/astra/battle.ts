@@ -3,7 +3,7 @@
 // against a snapshot and returns a new state plus an immutable event log. The screen only
 // captures one timing result per action and plays the log back, so skip, resize or a
 // double tap can never change results.
-import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_CHARGE, petBite, PETS, talentById, type ClassId, type PetId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_CHARGE, petBite, PETS, talentById, type ArmorId, type ClassId, type PetId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
 import { bonusOf, effectiveStats, focusOf, noTraining, type Training } from "./hero";
 
 export type Command = { type: "attack" } | { type: "skill" } | { type: "defend" } | { type: "burst" } | { type: "item"; item: ItemId };
@@ -60,7 +60,7 @@ export interface BattleState {
   classId: ClassId;
   talentId: string;
   level: number;
-  /** Flat stat bonus from training and the honed weapon (hero.ts bonusOf). */
+  /** Flat stat bonus from training, the honed weapon and armour (hero.ts bonusOf). */
   bonus?: Partial<Stats>;
   /** Focus: percent added to the attack and guard timing windows. */
   focus?: number;
@@ -140,7 +140,7 @@ const order = (b: BattleState): Slot[] =>
   b.round === 1 ? (has(b, "time_weaver") ? ["hero", "bonus", "foe"] : ["hero", "foe"]) : heroStats(b).spd >= foeStats(b).spd ? ["hero", "foe"] : ["foe", "hero"];
 
 export function startBattle(
-  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number; train?: Training; hone?: number },
+  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number; train?: Training; hone?: number; armor?: ArmorId },
   items: Record<ItemId, number>,
   encounterId: string,
   enemy: EnemyId,
@@ -154,7 +154,7 @@ export function startBattle(
     classId: hero.classId,
     talentId: hero.talentId,
     level: hero.level ?? 1,
-    bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0),
+    bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0, hero.armor),
     focus: focusOf(hero.train ?? noTraining()),
     pet: pet && { ...pet, charge: 0 },
     diff,

@@ -95,7 +95,7 @@ test("Continue restores the hero and chosen talent after refresh", async ({ page
   expect(saved.classId).toBe("ranger");
   expect(TALENTS.find((t) => t.id === saved.talentId)?.name).toBe(talent);
   const look = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero.look);
-  expect(look).toEqual(expect.objectContaining({ hair: "f3", outfit: 11 }));
+  expect(look).toEqual(expect.objectContaining({ hair: "f3", outfit: 16 })); // every new hero starts in the plain tunic
   expect(look).not.toHaveProperty("weapon");
   await expect(page.getByRole("button", { name: "ประตูเมือง" })).toBeVisible(); // a new hero starts in town
 });

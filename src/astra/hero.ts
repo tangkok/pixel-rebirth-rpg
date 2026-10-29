@@ -1,6 +1,8 @@
 import {
   CLASSES,
+  ARMORS,
   GROWTH,
+  type ArmorId,
   HONE_PER,
   TRAIN,
   TRAIN_IDS,
@@ -90,15 +92,16 @@ export function describeTalent(t: TalentDef): { plus: string[]; minus: string[] 
 export type Training = Record<TrainId, number>;
 export const noTraining = (): Training => Object.fromEntries(TRAIN_IDS.map((t) => [t, 0])) as Training;
 
-/** Flat stat bonus from training points and the honed weapon, added to base before the talent percents. */
-export function bonusOf(train: Training, hone: number): Partial<Stats> {
+/** Flat stat bonus from training points, the honed weapon and worn armour, added to base before the talent percents. */
+export function bonusOf(train: Training, hone: number, armor?: ArmorId): Partial<Stats> {
   const out: Partial<Stats> = { atk: hone * HONE_PER, mag: hone * HONE_PER };
+  for (const [s, n] of Object.entries(armor ? ARMORS[armor].stats : {}) as [keyof Stats, number][]) out[s] = (out[s] ?? 0) + n;
   for (const t of TRAIN_IDS)
     for (const [s, per] of Object.entries(TRAIN[t].stats) as [keyof Stats, number][]) out[s] = (out[s] ?? 0) + per * train[t];
   return out;
 }
 /** Timing window percent bonus from Focus. */
 export const focusOf = (train: Training) => train.focus * TRAIN.focus.window;
-/** A hero's stats with level, talent, training and hone all applied. */
-export const heroMax = (h: { classId: ClassId; talentId: string; level: number; train: Training; hone: number }) =>
-  effectiveStats(h.classId, h.talentId, h.level, bonusOf(h.train, h.hone));
+/** A hero's stats with level, talent, training, hone and armour all applied. */
+export const heroMax = (h: { classId: ClassId; talentId: string; level: number; train: Training; hone: number; armor: ArmorId }) =>
+  effectiveStats(h.classId, h.talentId, h.level, bonusOf(h.train, h.hone, h.armor));

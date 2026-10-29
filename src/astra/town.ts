@@ -1,7 +1,7 @@
 // The town between journeys (owner reference): a training hall that spends stat points, a
 // blacksmith that hones the class weapon or crafts battle items, and a farm that hatches pets.
 // Pure, all-or-nothing changes over SaveData like trade.ts; journey.ts only draws and forwards taps.
-import { HONE_MAX, honeCost, ITEMS, PADDOCK, PET_IDS, RECIPES, TRAIN_CAP, type ItemId, type TrainId } from "./data";
+import { ARMORS, HONE_MAX, honeCost, ITEMS, PADDOCK, PET_IDS, RECIPES, TRAIN_CAP, type ArmorId, type ItemId, type TrainId } from "./data";
 import { heroMax, noTraining } from "./hero";
 import { ITEM_CAP } from "./route";
 import type { SaveData } from "./save";
@@ -65,6 +65,29 @@ export function craft(s: SaveData, item: ItemId): Change {
   n.items.wolf_pelt -= r.wolf_pelt;
   n.items[item] += 1;
   return { ok: true, save: n };
+}
+
+/** Forges an armour set for Wolf Pelts and Gold; it is kept and can be worn any time after. */
+export function forgeArmor(s: SaveData, id: ArmorId): Change {
+  const c = ARMORS[id]?.cost;
+  if (!c) return { ok: false, why: "หลอมชุดนี้ไม่ได้" };
+  if (s.hero.armors.includes(id)) return { ok: false, why: "มีชุดนี้แล้ว" };
+  if (s.gold < c.gold) return { ok: false, why: "Gold ไม่พอ" };
+  if (s.items.wolf_pelt < c.wolf_pelt) return { ok: false, why: "Wolf Pelt ไม่พอ" };
+  const n = clone(s);
+  n.gold -= c.gold;
+  n.items.wolf_pelt -= c.wolf_pelt;
+  n.hero.armors.push(id);
+  return { ok: true, save: n };
+}
+
+/** Wears an owned armour set: its stats apply and the hero's outfit changes to it. */
+export function wear(s: SaveData, id: ArmorId): Change {
+  if (!s.hero.armors.includes(id)) return { ok: false, why: "ยังไม่มีชุดนี้" };
+  const n = clone(s);
+  n.hero.armor = id;
+  n.hero.look = { ...n.hero.look, ...ARMORS[id].look };
+  return { ok: true, save: clamp(n) };
 }
 
 /**

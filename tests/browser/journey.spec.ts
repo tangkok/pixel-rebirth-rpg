@@ -182,7 +182,7 @@ test("beating the boss ends the journey and a new one keeps the hero", async ({ 
 
 test("the town's hall spends level points and the smith hones and crafts", async ({ page }) => {
   await newHero(page);
-  await patch(page, "s.hero.level = 3; s.hero.exp = 80; s.gold = 100; s.items.wolf_pelt = 3;");
+  await patch(page, "s.hero.level = 3; s.hero.exp = 80; s.gold = 100; s.items.wolf_pelt = 6;");
   await expect(page.getByRole("button", { name: "ลานฝึก" })).toContainText("แต้มเหลือ 2");
   await page.getByRole("button", { name: "ลานฝึก" }).click();
   await expectNoScroll(page);
@@ -195,10 +195,16 @@ test("the town's hall spends level points and the smith hones and crafts", async
   await expect(page.locator(".building")).toContainText("Axe ขวาน +1");
   await page.getByRole("button", { name: "หัตถกรรม" }).click();
   await page.getByRole("button", { name: "สร้าง Potion" }).click();
+  await page.getByRole("button", { name: "ชุดเกราะ" }).click();
+  await expect(page.getByRole("button", { name: "ชุดผ้าธรรมดา สวมอยู่" })).toBeDisabled(); // a new hero wears the plain tunic
+  await page.getByRole("button", { name: "หลอม ชุดหนังนักล่า" }).dblclick(); // double tap = one forge
+  await page.waitForTimeout(450); // a tap inside the double-tap window on the same row is ignored on purpose
+  await page.getByRole("button", { name: "สวม ชุดหนังนักล่า" }).click();
   await page.reload();
   await page.getByRole("button", { name: "Continue" }).click();
   const s = await saved(page);
-  expect([s.hero.train.strength, s.hero.hone, s.gold, s.items.wolf_pelt, s.items.potion]).toEqual([1, 1, 75, 1, 4]);
+  expect([s.hero.train.strength, s.hero.hone, s.gold, s.items.wolf_pelt, s.items.potion]).toEqual([1, 1, 35, 1, 4]);
+  expect([s.hero.armor, s.hero.armors, s.hero.look.outfit]).toEqual(["hunter", ["tunic", "hunter"], 11]);
 });
 
 test("the farm hatches the egg and the pet bites in battle", async ({ page }) => {

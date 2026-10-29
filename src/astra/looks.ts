@@ -1,6 +1,6 @@
 // Heroes99 v1.2 layer catalog. public/astra/h99 holds idle + run atlases built by
 // scripts/import-heroes99.py; the row order here must match that script.
-import type { ClassId, Gender } from "./data";
+import { ARMORS, STARTER_ARMOR, type ClassId, type Gender } from "./data";
 
 export const FRAME_W = 100;
 export const FRAME_H = 40;
@@ -39,14 +39,6 @@ export interface Look {
   outfitColor: number;
 }
 
-/** Class starting outfits; players can restyle them in the look step. */
-export const CLASS_OUTFIT: Record<ClassId, Pick<Look, "outfit" | "outfitColor">> = {
-  knight: { outfit: 13, outfitColor: 8 },
-  ranger: { outfit: 11, outfitColor: 3 },
-  sorcerer: { outfit: 8, outfitColor: 4 },
-  cleric: { outfit: 10, outfitColor: 1 },
-  berserk: { outfit: 2, outfitColor: 1 },
-};
 
 /**
  * Weapon is fixed by class (GDD v1.7): Knight sword, Ranger bow, Sorcerer staff,
@@ -66,7 +58,8 @@ export const defaultLook = (gender: Gender, classId: ClassId): Look => ({
   face: 1,
   hair: HAIR_STYLES[gender][0],
   hairColor: 1,
-  ...CLASS_OUTFIT[classId],
+  // Every new hero starts in the plain tunic (owner request); class sets are forged at the blacksmith.
+  ...ARMORS[STARTER_ARMOR].look,
 });
 
 /** One layer: atlas URL and its variant index (the variant spans ANIM_ROWS strips). */

@@ -260,3 +260,19 @@ export const petLevel = (xp: number) => Math.min(PET_MAX_LEVEL, Math.floor(Math.
 /** One frame of public/astra/pets.png (scripts/draw-pets.py), in PET_IDS order. */
 export const PET_W = 20;
 export const PET_H = 16;
+
+/**
+ * PLACEHOLDER armour sets (owner request): every new hero starts in the plain tunic with ordinary
+ * stats; the blacksmith forges the rest. Stats are flat, like training. `look` is the Heroes99 outfit worn.
+ */
+export const ARMORS = {
+  tunic: { name: "ชุดผ้าธรรมดา", rarity: "common", stats: { def: 1 }, look: { outfit: 16, outfitColor: 1 }, cost: null },
+  hunter: { name: "ชุดหนังนักล่า", rarity: "uncommon", stats: { def: 3, spd: 2 }, look: { outfit: 11, outfitColor: 3 }, cost: { wolf_pelt: 3, gold: 40 } },
+  robe: { name: "เสื้อคลุมจอมเวท", rarity: "uncommon", stats: { res: 3, maxMp: 10 }, look: { outfit: 8, outfitColor: 4 }, cost: { wolf_pelt: 3, gold: 40 } },
+  vestment: { name: "อาภรณ์นักบวช", rarity: "rare", stats: { res: 5, mag: 2, maxHp: 10 }, look: { outfit: 10, outfitColor: 1 }, cost: { wolf_pelt: 6, gold: 120 } },
+  raider: { name: "เกราะนักรบเถื่อน", rarity: "rare", stats: { atk: 3, maxHp: 20 }, look: { outfit: 2, outfitColor: 1 }, cost: { wolf_pelt: 6, gold: 120 } },
+  plate: { name: "เกราะอัศวิน", rarity: "epic", stats: { def: 8, res: 4, maxHp: 30 }, look: { outfit: 13, outfitColor: 8 }, cost: { wolf_pelt: 10, gold: 400 } },
+} satisfies Record<string, { name: string; rarity: Rarity; stats: Partial<Stats>; look: { outfit: number; outfitColor: number }; cost: { wolf_pelt: number; gold: number } | null }>;
+export type ArmorId = keyof typeof ARMORS;
+export const ARMOR_IDS = Object.keys(ARMORS) as ArmorId[];
+export const STARTER_ARMOR: ArmorId = "tunic";

@@ -6,6 +6,8 @@ import "./astra.css";
 import { journey } from "./journey";
 import { button, composite, h, heroSprite, root, setSettings, settings, show, still, store, type Child } from "./ui";
 import {
+  ARMORS,
+  STARTER_ARMOR,
   CLASSES,
   CLASS_IDS,
   MAX_TALENT_DRAWS,
@@ -28,7 +30,6 @@ import {
   type Settings,
 } from "./save";
 import {
-  CLASS_OUTFIT,
   defaultLook,
   FACES,
   HAIR_COLORS,
@@ -253,8 +254,7 @@ function creation() {
           { class: "classes", role: "group", aria: { label: "อาชีพ" } },
           ...CLASS_IDS.map((c) =>
             button(CLASSES[c].name, () => {
-              d.classId = c;
-              d.look = { ...d.look, ...CLASS_OUTFIT[c] }; // class starting outfit; weapon follows class
+              d.classId = c; // weapon follows class; every class starts in the plain tunic
               render();
             }, {
               aria: { pressed: String(d.classId === c) },
@@ -325,7 +325,7 @@ function creation() {
     return [
       h("h2", { class: "hero-name" }, d.name.trim()),
       h("p", { class: "meta" }, `${d.gender === "male" ? "ชาย" : "หญิง"} · ${CLASSES[d.classId!].name} · ${t.name}`),
-      statGrid(effectiveStats(d.classId!, t.id), CLASSES[d.classId!].base),
+      statGrid(effectiveStats(d.classId!, t.id, 1, ARMORS[STARTER_ARMOR].stats), CLASSES[d.classId!].base),
       talentCard(t),
     ];
   }

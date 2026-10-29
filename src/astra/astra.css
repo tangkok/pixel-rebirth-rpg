@@ -1246,3 +1246,14 @@ footer.row {
   image-rendering: pixelated;
   border: 2px solid #3a4666;
 }
+/* Armour rows carry their rarity colour on the left edge, like the reference forge list. */
+.trow.armor {
+  border-left-width: 6px;
+}
+.trow.common { border-left-color: #b8b8b8; }
+.trow.uncommon { border-left-color: #5ec26a; }
+.trow.rare { border-left-color: #4d9bff; }
+.trow.epic { border-left-color: #b46cff; }
+.trow.uncommon .rarity { color: #5ec26a; }
+.trow.rare .rarity { color: #4d9bff; }
+.trow.epic .rarity { color: #b46cff; }

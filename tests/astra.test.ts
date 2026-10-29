@@ -180,9 +180,9 @@ describe("Heroes99 looks", () => {
       ["h99/skin.png", 0],
       ["h99/face.png", 0],
       ["h99/hair/f1.png", 0],
-      ["h99/cloth/cloth13.png", 14],
+      ["h99/cloth/cloth16.png", 0],
       ["h99/hair/f1.png", 1],
-      ["h99/cloth/cloth13.png", 15],
+      ["h99/cloth/cloth16.png", 1],
       ["h99/weapon/weapon1.png", 1],
     ]);
   });
