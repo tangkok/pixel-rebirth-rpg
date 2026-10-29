@@ -632,109 +632,11 @@ TOWN_TILES = [
 ]
 
 
-# ---------- player shop interior (own seed so earlier tiles never change) ----------
-r3 = random.Random(13)
-PL1, PL2, PL3 = "#5a3a22", "#7a4f2c", "#94653a"  # floor planks
-PELT1, PELT2, PELT3 = "#5b4636", "#8a6a4e", "#b8946a"
-
-
-def floor():
-    img = tile()
-    for y in range(T):
-        for x in range(T):
-            px(img, x, y, PL2 if (y // 4) % 2 else PL3)
-    for y in range(0, T, 4):
-        for x in range(T):
-            px(img, x, y, PL1)  # plank seams
-        cut = (y // 4 * 7 + 3) % T
-        for yy in range(y, y + 4):
-            px(img, cut, yy, PL1)
-    for _ in range(10):
-        px(img, r3.randrange(T), r3.randrange(T), PL1)
-    return img
-
-
-def shop_wall():
-    img = tile()
-    for y in range(T):
-        for x in range(T):
-            px(img, x, y, WOOD1 if y < 10 else (WOOD2 if y < 15 else INK))
-    for x in range(0, T, 4):
-        for y in range(0, 10):
-            px(img, x, y, "#3e1a14")  # panel boards
-    for x in range(T):
-        px(img, x, 10, WOOD3)  # dado rail
-    return img
-
-
-def shop_door():
-    img = floor()
-    for y in range(9, T):
-        for x in range(2, 14):
-            px(img, x, y, "#6b2f2a" if (x + y) % 2 else "#8c3f36")  # door mat
-    for x in range(2, 14):
-        px(img, x, 9, INK)
-    for y in range(9, T):
-        px(img, 2, y, INK)
-        px(img, 13, y, INK)
-    for x in range(5, 11):
-        px(img, x, 12, LIGHT)  # threshold glint
-    return img
-
-
-def shelf(stock):
-    img = floor()
-    for y in range(1, T):
-        for x in range(1, 15):
-            edge = x in (1, 14) or y in (1, 15)
-            px(img, x, y, INK if edge else (WOOD3 if y in (5, 10) else WOOD2))
-    for y in (5, 10):
-        for x in range(2, 14):
-            px(img, x, y + 1, WOOD1)  # board shadow
-    spots = [(3, 2), (8, 2), (3, 7), (8, 7), (5, 12)][:stock]
-    for sx, sy in spots:  # rolled pelts
-        for y in range(3):
-            for x in range(5):
-                px(img, sx + x, sy + y, INK if y == 2 or x in (0, 4) else (PELT3 if y == 0 else PELT2))
-        px(img, sx + 1, sy + 1, PELT1)
-    return img
-
-
-def counter():
-    img = floor()
-    for y in range(3, T):
-        for x in range(0, 16):
-            top = y < 7
-            edge = y in (3, 15) or (y == 7)
-            px(img, x, y, INK if edge else (WOOD3 if top else WOOD2))
-    for x in range(0, 16, 5):
-        for y in range(8, 15):
-            px(img, x, y, WOOD1)
-    for y in range(1, 6):  # cash box
-        for x in range(9, 14):
-            px(img, x, y, INK if x in (9, 13) or y in (1, 5) else GOLD)
-    px(img, 11, 3, LIGHT)
-    for x, y in ((3, 4), (4, 5), (5, 4)):  # coins
-        px(img, x, y, LIGHT)
-    return img
-
-
-SHOP_TILES = [
-    ("floor", floor),
-    ("shop_wall", shop_wall),
-    ("shop_door", shop_door),
-    ("shelf_empty", lambda: shelf(0)),
-    ("shelf_low", lambda: shelf(2)),
-    ("shelf_full", lambda: shelf(5)),
-    ("counter", counter),
-]
-
-
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     old = [make() for _, make in TILES]  # draw these first: they share the original seed
     wolf, battle = wolf_frames(), battle_forest()
-    every = old + [make() for _, make in TOWN_TILES] + [make() for _, make in SHOP_TILES]
+    every = old + [make() for _, make in TOWN_TILES]
     sheet = Image.new("RGBA", (T * len(every), T))
     for i, img in enumerate(every):
         sheet.paste(img, (T * i, 0))
@@ -742,7 +644,7 @@ def main() -> None:
     wolf.save(OUT / "wolf.png", optimize=True)
     battle.save(OUT / "battle_forest.png", optimize=True)
     fountain().save(OUT / "fountain.png", optimize=True)
-    print(" ".join(name for name, _ in TILES + TOWN_TILES + SHOP_TILES))
+    print(" ".join(name for name, _ in TILES + TOWN_TILES))
 
 
 if __name__ == "__main__":

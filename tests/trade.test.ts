@@ -93,3 +93,14 @@ describe("Kael trades", () => {
     expect(parseSave(JSON.stringify({ ...s, trade: { seq: -1, kael: {} } }))).toBeNull();
   });
 });
+
+describe("removed player shop", () => {
+  it("loads a v4 save from the shop build and returns shelf stock to the bag", () => {
+    const s = fresh();
+    const v4 = { ...s, version: 4, items: { ...s.items, wolf_pelt: 1 }, shop: { open: true, sales: 2, shelves: { shelf_a: { item: "wolf_pelt", qty: 3, tier: 80 }, shelf_b: null } } };
+    const back = parseSave(JSON.stringify(v4))!;
+    expect(back.version).toBe(3);
+    expect(back.items.wolf_pelt).toBe(4);
+    expect(back).not.toHaveProperty("shop");
+  });
+});
