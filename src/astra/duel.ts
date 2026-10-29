@@ -1,7 +1,7 @@
 // Side-view duel screen (BATTLE_VISUAL_DIRECTION). Captures one timing result per action,
 // commits it through battle.ts, then plays the returned event log; skip and resize only
 // change what is drawn.
-import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, type Element, type ItemId } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_H, PET_IDS, PET_W, petLevel, PETS, type Element, type ItemId } from "./data";
 import {
   act,
   BURSTS,
@@ -46,7 +46,8 @@ export function duel(
   place: string,
   done: (b: BattleState) => void,
 ) {
-  let b = startBattle(save.hero, save.items, encounterId, enemy, save.progress.diff);
+  const pal = save.pets.list.find((p) => p.id === save.pets.with);
+  let b = startBattle(save.hero, save.items, encounterId, enemy, save.progress.diff, pal ? { species: pal.species, level: petLevel(pal.xp) } : null);
   let seq = 0;
   let playing = false;
   let skipTo: (() => void) | null = null;
@@ -128,6 +129,9 @@ export function duel(
   let sparks: { who: Side; t0: number; big: boolean } | null = null;
   let shake = { t0: -1e9, amp: 0 };
   let flashT0 = -1e9; // whole-stage white flash (Astra Burst)
+  let petLunge = -1e9;
+  const petImg = new Image();
+  petImg.src = "pets.png";
   let heroSheet: HTMLCanvasElement | null = null;
   const bg = new Image();
   bg.src = "world/battle_forest.png";
@@ -224,6 +228,13 @@ export function duel(
       ctx.globalAlpha = hp.alpha;
       blit(heroSheet, hp.f * FRAME_W, a.row * FRAME_H, FRAME_W, FRAME_H, heroX - 41, FOOT - 34 - hp.y, flashing("hero") ? "#ffffffd0" : undefined);
       ctx.globalAlpha = 1;
+    }
+    if (b.pet && petImg.complete && petImg.naturalWidth) {
+      // Pet beside the hero: hops while idle, dashes at the enemy when it bites.
+      const lt = now - petLunge;
+      const dash = lt < 360 ? Math.round(60 * Math.sin((Math.PI * lt) / 360)) : 0;
+      const hop = calm || lt < 360 ? 0 : Math.floor(now / 300) % 2;
+      blit(petImg, PET_IDS.indexOf(b.pet.species) * PET_W, 0, PET_W, PET_H, heroX - 30 + dash, FOOT - PET_H + 2 - hop);
     }
     if (wolfImg.complete && wolfImg.naturalWidth) {
       ctx.globalAlpha = fp.alpha;
@@ -502,6 +513,13 @@ export function duel(
             step();
           });
           return;
+        } else if (e.type === "pet") {
+          foeHp = e.hp;
+          astra = e.astra;
+          const petName = PETS[b.pet!.species].name;
+          say(`${petName} ใช้ ${e.name}${e.damage ? ` · ${e.damage} ดาเมจ` : ""}`, e.damage ? `-${e.damage}` : e.name, "at-foe");
+          if (e.damage) reaction = { who: "foe", kind: "hurt", t0: now };
+          petLunge = now;
         } else if (e.type === "heal") {
           heroHp = e.hp;
           say(`${e.name} ฟื้นฟู ${e.amount} HP`, `+${e.amount}`, "at-hero heal");

@@ -1065,7 +1065,7 @@ footer.row {
 }
 .street {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2%;
   padding: 0 2% 2%;
   align-items: end;
@@ -1209,7 +1209,7 @@ footer.row {
 @media (max-aspect-ratio: 4 / 5) {
   /* portrait: the gate across the top, hall and smithy under it, so the buildings stay big */
   .street {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .bldg.gate {
     grid-column: 1 / -1;
@@ -1232,4 +1232,17 @@ footer.row {
   .building aside p {
     display: none;
   }
+}
+.trow.pet {
+  grid-template-columns: auto 1fr auto;
+}
+.trow.pet.with {
+  border-color: var(--gold);
+}
+.pet-icon {
+  width: 60px;
+  height: 48px;
+  background: 0 0 / 400% 100% no-repeat #241c3a; /* image set inline: public/astra/pets.png */
+  image-rendering: pixelated;
+  border: 2px solid #3a4666;
 }

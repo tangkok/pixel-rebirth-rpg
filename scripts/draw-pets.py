@@ -1,0 +1,126 @@
+"""Draw the original pet sprites for Echoes of Astra (side view, facing right).
+
+Usage: python3 -I scripts/draw-pets.py
+Writes public/astra/pets.png: one 20x16 frame per pet in PET_IDS order (pup, kitten, owl,
+axolotl). Each pet is an ASCII map below; '.' is transparent. Requires Pillow.
+"""
+from pathlib import Path
+
+from PIL import Image
+
+OUT = Path(__file__).resolve().parent.parent / "public/astra/pets.png"
+W, H = 20, 16
+
+PALETTE = {
+    "k": "#1a1020",  # outline
+    "w": "#ffffff",
+    "e": "#1a1020",  # eye
+    # pup
+    "b": "#a8743a", "B": "#7a4f24", "c": "#e8cfa0", "n": "#3a2414",
+    # kitten
+    "o": "#f0962c", "O": "#c46a18", "y": "#ffd8a0",
+    # owl
+    "g": "#8a7458", "G": "#5e4c38", "f": "#d8c8a0", "Y": "#f4c430",
+    # axolotl
+    "p": "#f4a0c0", "P": "#d86a98", "r": "#e84a7a", "q": "#ffd0e0",
+}
+
+PUP = """
+....................
+....................
+.............kk.....
+............kBBk....
+...........kbbbbkk..
+...........kbbebbbnk
+..........kbbbbbccck
+...k......kbbbbbkkk.
+..kbk....kbbbbbbk...
+..kbbkkkkbbbbbbbk...
+...kbbbbbbbbbbbk....
+...kbbbbbbbbccbk....
+...kbbbbbbbbcckk....
+...kbk.kbk.kbk.kbk..
+...kBk.kBk.kBk.kBk..
+...kk..kk..kk..kk...
+"""
+
+KITTEN = """
+....................
+............k...k...
+...........kok.kok..
+...........koookoo..
+..k........kooooook.
+.kok.......koeooeok.
+.kok.......kooyyyok.
+..kok......kooyyok..
+...kok...kkkoooook..
+....kkkkkooOooOook..
+....kooOooOooOoook..
+....kooooooooyyok...
+....koooooooyyyok...
+....kok.kok.kok.kok.
+....kOk.kOk.kOk.kOk.
+....kk..kk..kk..kk..
+"""
+
+OWL = """
+....................
+........k.....k.....
+........kk...kk.....
+........kgkkkgk.....
+.......kgggggggk....
+......kfffgggfffk...
+......kfwefgfwefk...
+......kfffkYkfffk...
+......kggggYggggk...
+.....kGgffffffgGk...
+.....kGgfgfgfgfGk...
+.....kGgffffffgGk...
+.....kGGgfgfgfGGk...
+......kGGgggggGk....
+.......kkYk.kYkk....
+........kk...kk.....
+"""
+
+AXOLOTL = """
+....................
+............r.r.r...
+...........kkkkkkk..
+..........kpppppppk.
+.........rkpwepweprk
+..........kpppppppk.
+...........kpqqqpk..
+.kk.......kpppppk...
+kPPkkk...kpppppppk..
+.kPPPPkkkpppppppppk.
+..kkPPPPPpppppqqqk..
+....kkkPPPpppqqqk...
+.......kkkkkkkkk....
+.........kpk..kpk...
+.........kPk..kPk...
+.........kk...kk....
+"""
+
+
+def sprite(art: str) -> Image.Image:
+    rows = [r for r in art.strip("\n").split("\n")]
+    assert len(rows) == H and all(len(r) == W for r in rows), [len(r) for r in rows]
+    img = Image.new("RGBA", (W, H))
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                img.putpixel((x, y), Image.new("RGBA", (1, 1), PALETTE[ch]).getpixel((0, 0)))
+    return img
+
+
+def main():
+    pets = [PUP, KITTEN, OWL, AXOLOTL]
+    sheet = Image.new("RGBA", (W * len(pets), H))
+    for i, art in enumerate(pets):
+        sheet.paste(sprite(art), (i * W, 0))
+    sheet.save(OUT)
+    print("wrote", OUT)
+
+
+if __name__ == "__main__":
+    main()

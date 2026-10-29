@@ -1,7 +1,7 @@
-// The town between journeys (owner reference): a training hall that spends stat points and a
-// blacksmith that hones the class weapon or crafts battle items. Pure, all-or-nothing changes
-// over SaveData like trade.ts; journey.ts only draws and forwards taps.
-import { HONE_MAX, honeCost, ITEMS, RECIPES, TRAIN_CAP, type ItemId, type TrainId } from "./data";
+// The town between journeys (owner reference): a training hall that spends stat points, a
+// blacksmith that hones the class weapon or crafts battle items, and a farm that hatches pets.
+// Pure, all-or-nothing changes over SaveData like trade.ts; journey.ts only draws and forwards taps.
+import { HONE_MAX, honeCost, ITEMS, PADDOCK, PET_IDS, RECIPES, TRAIN_CAP, type ItemId, type TrainId } from "./data";
 import { heroMax, noTraining } from "./hero";
 import { ITEM_CAP } from "./route";
 import type { SaveData } from "./save";
@@ -64,5 +64,41 @@ export function craft(s: SaveData, item: ItemId): Change {
   n.gold -= r.gold;
   n.items.wolf_pelt -= r.wolf_pelt;
   n.items[item] += 1;
+  return { ok: true, save: n };
+}
+
+/**
+ * Hatches one Pet Egg into the paddock. The species comes from the hero name and egg count, so a
+ * reload can never reroll it (PLACEHOLDER: all four are equally likely, no rarities yet).
+ */
+export function hatch(s: SaveData): Change {
+  if (s.items.pet_egg < 1) return { ok: false, why: "ไม่มีไข่" };
+  if (s.pets.list.length >= PADDOCK) return { ok: false, why: "คอกเต็มแล้ว" };
+  const n = clone(s);
+  const id = n.pets.seq + 1;
+  let hash = id;
+  for (const c of n.hero.name) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  n.items.pet_egg -= 1;
+  n.pets.seq = id;
+  n.pets.list.push({ id, species: PET_IDS[hash % PET_IDS.length], xp: 0 });
+  if (n.pets.with === null) n.pets.with = id; // the first pet comes along straight away
+  return { ok: true, save: n };
+}
+
+/** Picks which pet travels with the hero (null: none). */
+export function bring(s: SaveData, id: number | null): Change {
+  if (id !== null && !s.pets.list.some((p) => p.id === id)) return { ok: false, why: "ไม่มีสัตว์ตัวนี้" };
+  const n = clone(s);
+  n.pets.with = id;
+  return { ok: true, save: n };
+}
+
+/** Lets a pet go to free a paddock slot. */
+export function release(s: SaveData, id: number): Change {
+  const pet = s.pets.list.find((p) => p.id === id);
+  if (!pet) return { ok: false, why: "ไม่มีสัตว์ตัวนี้" };
+  const n = clone(s);
+  n.pets.list = n.pets.list.filter((p) => p.id !== id);
+  if (n.pets.with === id) n.pets.with = null;
   return { ok: true, save: n };
 }

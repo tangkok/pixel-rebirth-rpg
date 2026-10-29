@@ -31,7 +31,7 @@ export const ROUTE: Record<string, RouteNode> = {
   r4c: { kind: "chest", row: 4, col: 2, loot: { potion: 2, storm_vial: 1 }, next: ["r5b"] },
   r5a: { kind: "battle", row: 5, col: 0, enemy: "forest_wolf", next: ["boss"] },
   r5b: { kind: "rest", row: 5, col: 2, next: ["boss"] },
-  boss: { kind: "boss", row: 6, col: 1, enemy: "ancient_guardian", next: [] },
+  boss: { kind: "boss", row: 6, col: 1, enemy: "ancient_guardian", loot: { pet_egg: 1 }, next: [] },
 };
 export const ROUTE_START = ["r1a", "r1b"];
 export const ROUTE_ROWS = 6;
@@ -91,12 +91,13 @@ export function visit(s: SaveData, id: string): SaveData | null {
   return n;
 }
 
-/** EXP and Gold of one won fight on `id`, after the journey's difficulty reward multiplier. */
-export function rewardOf(s: SaveData, id: string): { exp: number; gold: number; item: ItemId | null } {
+/** EXP, Gold and pet XP (half the EXP, PLACEHOLDER) of one won fight on `id`, after the difficulty reward multiplier. */
+export function rewardOf(s: SaveData, id: string): { exp: number; gold: number; item: ItemId | null; petXp: number } {
   const enemy = ROUTE[id].enemy!;
   const r = DIFFICULTIES[s.progress.diff].reward;
   const loot = lootOf(enemy, id);
-  return { exp: Math.floor((expFor(enemy, s.hero.talentId) * r) / 100), gold: Math.floor(((loot?.gold ?? 0) * r) / 100), item: loot?.item ?? null };
+  const exp = Math.floor((expFor(enemy, s.hero.talentId) * r) / 100);
+  return { exp, gold: Math.floor(((loot?.gold ?? 0) * r) / 100), item: loot?.item ?? null, petXp: s.pets.with === null ? 0 : Math.floor(exp / 2) };
 }
 
 /** Applies a won fight on a reachable battle/boss node. Replaying it changes nothing. */
@@ -112,6 +113,9 @@ export function recordVictory(s: SaveData, id: string): SaveData {
   if (n.hero.level > was) heal(n); // PLACEHOLDER: a level-up fully restores HP/MP (no rule in the GDD yet)
   n.gold = Math.min(n.gold + got.gold, GOLD_CAP);
   if (got.item) n.items[got.item] = Math.min(n.items[got.item] + 1, ITEM_CAP);
+  for (const [item, qty] of Object.entries(node.loot ?? {}) as [ItemId, number][]) n.items[item] = Math.min(n.items[item] + qty, ITEM_CAP);
+  const pet = n.pets.list.find((p) => p.id === n.pets.with);
+  if (pet) pet.xp = Math.min(pet.xp + got.petXp, 1e7);
   if (node.kind === "boss") n.progress.wins += 1;
   return n;
 }

@@ -3,7 +3,7 @@
 // against a snapshot and returns a new state plus an immutable event log. The screen only
 // captures one timing result per action and plays the log back, so skip, resize or a
 // double tap can never change results.
-import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, talentById, type ClassId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_CHARGE, petBite, PETS, talentById, type ClassId, type PetId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
 import { bonusOf, effectiveStats, focusOf, noTraining, type Training } from "./hero";
 
 export type Command = { type: "attack" } | { type: "skill" } | { type: "defend" } | { type: "burst" } | { type: "item"; item: ItemId };
@@ -64,6 +64,8 @@ export interface BattleState {
   bonus?: Partial<Stats>;
   /** Focus: percent added to the attack and guard timing windows. */
   focus?: number;
+  /** The travelling pet: bites after each hero action, uses its ability every PET_CHARGE bites. */
+  pet?: { species: PetId; level: number; charge: number } | null;
   diff: DifficultyId;
   hero: Fighter & { astra: number; revived: boolean };
   foe: Fighter & {
@@ -101,6 +103,7 @@ export type BattleEvent =
       astra: number;
     }
   | { type: "defend"; by: "hero" | "foe" }
+  | { type: "pet"; name: string; damage: number; hp: number; astra: number }
   | { type: "heal"; by: "hero"; name: string; amount: number; hp: number }
   | { type: "mp"; name: string; amount: number; mp: number }
   | { type: "recoil"; name: string; damage: number; hp: number }
@@ -142,6 +145,7 @@ export function startBattle(
   encounterId: string,
   enemy: EnemyId,
   diff: DifficultyId = "normal",
+  pet: { species: PetId; level: number } | null = null,
 ): BattleState {
   const max = foeStats({ enemy, diff }).maxHp;
   const b: BattleState = {
@@ -152,6 +156,7 @@ export function startBattle(
     level: hero.level ?? 1,
     bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0),
     focus: focusOf(hero.train ?? noTraining()),
+    pet: pet && { ...pet, charge: 0 },
     diff,
     hero: { hp: hero.hp, mp: hero.mp, defending: false, astra: 0, revived: false },
     foe: { hp: max, mp: 0, defending: false, actions: 0, aura: null, auraAge: 0, shock: 0, weak: false, frozen: false, freezeImmune: 0 },
@@ -308,6 +313,7 @@ export function act(prev: BattleState, actionId: string, c: Command, timing: Tim
     else if ("power" in item) strike(item.name, "magic", item.power, [], item.element); // PLACEHOLDER: consumables hit as magic
   }
 
+  petTurn(b, ev);
   // End of a hero action: an older aura that was not used expires; Thermal Shock ticks down.
   if (b.foe.aura && b.foe.aura === auraBefore && b.foe.auraAge >= 1) b.foe.aura = null;
   else if (b.foe.aura) b.foe.auraAge += 1;
@@ -315,6 +321,28 @@ export function act(prev: BattleState, actionId: string, c: Command, timing: Tim
   if (b.foe.hp <= 0) return finish(b, ev, "win");
   advance(b, ev);
   return { state: b, events: ev };
+}
+
+/** The pet acts after each hero action while the enemy stands; it ignores DEF and cannot be hurt. */
+function petTurn(b: BattleState, ev: BattleEvent[]) {
+  const p = b.pet;
+  if (!p || b.foe.hp <= 0) return;
+  const hit = (name: string, raw: number) => {
+    const dmg = Math.min(b.foe.hp, raw);
+    b.foe.hp -= dmg;
+    ev.push({ type: "pet", name, damage: dmg, hp: b.foe.hp, astra: b.hero.astra });
+  };
+  p.charge += 1;
+  if (p.charge < PET_CHARGE) return hit("กัด", petBite(p.level));
+  p.charge = 0;
+  const name = PETS[p.species].ability;
+  if (p.species === "kitten") hit(name, petBite(p.level) * 3);
+  else if (p.species === "axolotl") heal(b, ev, name, Math.floor((heroStats(b).maxHp * 6) / 100));
+  else {
+    if (p.species === "pup") b.foe.weak = true;
+    else b.hero.astra = clampAstra(b.hero.astra + 25);
+    hit(name, 0);
+  }
 }
 
 /** Resolves the enemy's locked intent against the hero's one Perfect Guard result. */

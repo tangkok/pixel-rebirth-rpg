@@ -176,6 +176,8 @@ export const ITEMS = {
   storm_vial: { name: "Storm Vial", element: "lightning" as Element, power: 8 },
   /** Forest Wolf drop (LOOT_DROP_SYSTEM); a trade material, never usable in battle. */
   wolf_pelt: { name: "Wolf Pelt", material: true },
+  /** Hatched at the farm (owner reference); the boss leaves one. Never usable in battle. */
+  pet_egg: { name: "Pet Egg", material: true },
 } as const;
 export type ItemId = keyof typeof ITEMS;
 export const STARTING_ITEMS: Record<ItemId, number> = {
@@ -184,6 +186,7 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   frost_shard: 1,
   storm_vial: 1,
   wolf_pelt: 0,
+  pet_egg: 1,
 }; // PLACEHOLDER
 
 /**
@@ -234,3 +237,26 @@ export const RECIPES: Partial<Record<ItemId, { wolf_pelt: number; gold: number }
   frost_shard: { wolf_pelt: 2, gold: 15 },
   storm_vial: { wolf_pelt: 2, gold: 15 },
 };
+
+/**
+ * PLACEHOLDER pets (owner reference farm): one travels with the hero, bites after each hero action
+ * (it cannot be hurt), and every PET_CHARGE bites uses its ability instead of waiting.
+ */
+export const PETS = {
+  pup: { name: "ลูกสุนัข", ability: "เห่าขู่", text: "ศัตรู ATK −15% ในการโจมตีครั้งถัดไป" },
+  kitten: { name: "ลูกแมวลายส้ม", ability: "ข่วนรัว", text: "ข่วน 3 ครั้งติด ดาเมจ ×3" },
+  owl: { name: "นกฮูกตาโต", ability: "ตาเฉียบ", text: "Astra +25" },
+  axolotl: { name: "แอกโซลอเติล", ability: "รักษา", text: "ฟื้น HP 6% ของ MaxHP" },
+} as const;
+export type PetId = keyof typeof PETS;
+export const PET_IDS = Object.keys(PETS) as PetId[];
+export const PET_CHARGE = 3;
+export const PADDOCK = 6;
+export const PET_MAX_LEVEL = 30;
+/** Bite damage ignores DEF: a small flat hit that grows with the pet's level. */
+export const petBite = (level: number) => 2 + Math.floor(level / 2);
+/** Pet level from its XP, on the hero curve 10 × (L² − 1) up to PET_MAX_LEVEL. */
+export const petLevel = (xp: number) => Math.min(PET_MAX_LEVEL, Math.floor(Math.sqrt(xp / 10 + 1)));
+/** One frame of public/astra/pets.png (scripts/draw-pets.py), in PET_IDS order. */
+export const PET_W = 20;
+export const PET_H = 16;

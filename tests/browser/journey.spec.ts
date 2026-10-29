@@ -201,6 +201,25 @@ test("the town's hall spends level points and the smith hones and crafts", async
   expect([s.hero.train.strength, s.hero.hone, s.gold, s.items.wolf_pelt, s.items.potion]).toEqual([1, 1, 75, 1, 4]);
 });
 
+test("the farm hatches the egg and the pet bites in battle", async ({ page }) => {
+  await newHero(page);
+  await patch(page, "");
+  await page.getByRole("button", { name: "ฟาร์ม" }).click();
+  await expectNoScroll(page);
+  await page.getByRole("button", { name: "ไข่ 1" }).click();
+  await page.getByRole("button", { name: "ฟักไข่" }).dblclick(); // double tap = one egg
+  await page.getByRole("button", { name: /^สัตว์เลี้ยง 1\/6/ }).click();
+  await expect(page.locator(".trow.pet.with")).toHaveCount(1);
+  const s = await saved(page);
+  expect([s.items.pet_egg, s.pets.list.length, s.pets.with]).toEqual([0, 1, 1]);
+  await page.getByRole("button", { name: "กลับเมือง" }).click();
+  await page.getByRole("button", { name: "ประตูเมือง" }).click();
+  await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
+  await node(page, "r1a").click();
+  await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
+  await expect(page.locator(".log")).toContainText("ใช้ กัด", { timeout: 10_000 });
+});
+
 for (const size of SIZES) {
   test(`route, dialog and duel fit without scrolling: ${size.name}`, async ({ page }) => {
     await page.setViewportSize(size);

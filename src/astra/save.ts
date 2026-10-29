@@ -6,6 +6,9 @@ import {
   HONE_MAX,
   ITEMS,
   MAX_LEVEL,
+  PADDOCK,
+  PET_IDS,
+  type PetId,
   STARTING_ITEMS,
   TRAIN_CAP,
   TRAIN_IDS,
@@ -51,9 +54,17 @@ export interface SaveData {
     /** Difficulty of the current journey, chosen before its first step. */
     diff: DifficultyId;
   };
+  /** Farm: hatched pets (`seq` numbers them, so ids never repeat) and the one travelling along. */
+  pets: { seq: number; list: Pet[]; with: number | null };
   /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
   trade: { seq: number; kael: Partial<Record<ItemId, number>> };
   savedAt: number;
+}
+
+export interface Pet {
+  id: number;
+  species: PetId;
+  xp: number;
 }
 
 export interface Settings {
@@ -77,6 +88,7 @@ export function newSave(
     items: { ...STARTING_ITEMS },
     gold: 0,
     progress: freshProgress(),
+    pets: { seq: 0, list: [], with: null },
     trade: freshTrade(),
     savedAt: Date.now(),
   };
@@ -157,6 +169,8 @@ export function parseSave(raw: string | null): SaveData | null {
     kael[id] = (stock[id] as number | undefined) ?? 0;
   }
   if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
+  const pets = parsePets(d.pets ?? { seq: 0, list: [], with: null }); // saves from before the farm
+  if (!pets) return null;
 
   return {
     version: SAVE_VERSION,
@@ -176,9 +190,23 @@ export function parseSave(raw: string | null): SaveData | null {
     items: bag,
     gold: d.gold,
     progress: { path: [...(path as string[])], wins: p.wins, diff: diff as DifficultyId },
+    pets,
     trade: { seq: t.seq, kael },
     savedAt: d.savedAt,
   };
+}
+
+function parsePets(v: unknown): SaveData["pets"] | null {
+  if (!isObj(v) || !isInt(v.seq, 0, 1e9) || !Array.isArray(v.list) || v.list.length > PADDOCK) return null;
+  const list: Pet[] = [];
+  for (const p of v.list) {
+    if (!isObj(p) || !isInt(p.id, 1, v.seq) || !PET_IDS.includes(p.species as PetId) || !isInt(p.xp, 0, 1e7)) return null;
+    if (list.some((q) => q.id === p.id)) return null;
+    list.push({ id: p.id, species: p.species as PetId, xp: p.xp });
+  }
+  const w = v.with;
+  if (w !== null && !list.some((p) => p.id === w)) return null;
+  return { seq: v.seq, list, with: w as number | null };
 }
 
 /**
