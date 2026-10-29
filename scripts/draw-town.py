@@ -1,7 +1,7 @@
 """Town art for Echoes of Astra: draws the night backdrop and copies the buildings the town uses.
 
 Usage: python3 -I scripts/draw-town.py "<path to Tiny Top-Down Village folder>"
-Writes public/astra/town/backdrop.png (original, fixed seed) and the used buildings from
+Writes public/astra/town/backdrop.png and yard.png (original, fixed seed) and the used buildings from
 Pixel-Deck's Tiny Top-Down Village pack (owner-supplied; its license allows use in games but not
 redistributing the whole pack, so only the used buildings are copied). Requires Pillow.
 """
@@ -72,18 +72,51 @@ def backdrop():
     return img
 
 
+def yard():
+    """The farm: dusk sky, hills, a grass field with a dirt road across it (the paddock fence is CSS)."""
+    w, h = 192, 108
+    img = Image.new("RGBA", (w, h))
+    d = ImageDraw.Draw(img)
+    top, low = (58, 44, 96), (226, 132, 98)
+    for y in range(34):
+        t = y / 33
+        d.line([(0, y), (w, y)], fill=tuple(int(a + (b - a) * t) for a, b in zip(top, low)))
+    for _ in range(30):
+        d.point((rng.randrange(w), rng.randrange(14)), fill="#ffffff")
+    d.ellipse([140, 28, 152, 40], fill="#ffd77a")  # setting sun
+    for x in range(0, 40, 4):  # castle wall far left
+        rect(d, x, 20, x + 2, 22, STONE2)
+    rect(d, 0, 22, 40, 34, STONE2)
+    rect(d, 34, 12, 40, 34, STONE2)
+    rect(d, 33, 9, 41, 12, SLATE2)
+    pts = [(0, 40)] + [(x, 30 + int(4 * ((x * 7) % 13) / 13)) for x in range(0, w + 8, 8)] + [(w, 40)]
+    d.polygon(pts, fill="#2c5a3a")
+    rect(d, 0, 36, w - 1, h - 1, "#5aa04a")  # field
+    for _ in range(260):
+        d.point((rng.randrange(w), rng.randrange(38, h)), fill=rng.choice(["#4a8a3e", "#6cb456", "#78c060"]))
+    for _ in range(18):
+        d.point((rng.randrange(w), rng.randrange(40, h)), fill=rng.choice(["#f4a0c0", "#ffe08a", "#ffffff"]))
+    rect(d, 0, 50, w - 1, 53, "#8a5a32")  # road
+    d.line([(0, 50), (w, 50)], fill="#6a4426")
+    for x in range(3, w, 9):
+        d.point((x, 52), fill="#a8784a")
+    return img
+
+
 # Town spot -> Pixel-Deck building file.
 BUILDINGS = {
     "gate": "Guard House",
     "hall": "Adventurers Guild",
     "smithy": "Blacksmith House",
     "farm": "Farmers House",
+    "barn": "Stable",
 }
 
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     backdrop().save(OUT / "backdrop.png")
+    yard().save(OUT / "yard.png")
     pack = Path(sys.argv[1])
     for spot, name in BUILDINGS.items():
         shutil.copyfile(pack / f"{name}.png", OUT / f"{spot}.png")

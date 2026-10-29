@@ -47,7 +47,7 @@ export function duel(
   done: (b: BattleState) => void,
 ) {
   const pal = save.pets.list.find((p) => p.id === save.pets.with);
-  let b = startBattle(save.hero, save.items, encounterId, enemy, save.progress.diff, pal ? { species: pal.species, level: petLevel(pal.xp) } : null);
+  let b = startBattle(save.hero, save.items, encounterId, enemy, save.progress.diff, pal ? { species: pal.species, rarity: pal.rarity, level: petLevel(pal.xp, pal.rarity) } : null);
   let seq = 0;
   let playing = false;
   let skipTo: (() => void) | null = null;
@@ -516,7 +516,7 @@ export function duel(
         } else if (e.type === "pet") {
           foeHp = e.hp;
           astra = e.astra;
-          const petName = PETS[b.pet!.species].name;
+          const petName = pal?.name || PETS[b.pet!.species].name;
           say(`${petName} ใช้ ${e.name}${e.damage ? ` · ${e.damage} ดาเมจ` : ""}`, e.damage ? `-${e.damage}` : e.name, "at-foe");
           if (e.damage) reaction = { who: "foe", kind: "hurt", t0: now };
           petLunge = now;

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { act, guard, startBattle } from "../src/astra/battle";
-import { PADDOCK, petBite, petLevel, STARTING_ITEMS } from "../src/astra/data";
+import { FARM_TIERS, petBite, petLevel, STARTING_ITEMS } from "../src/astra/data";
 import { heroMax } from "../src/astra/hero";
 import { defaultLook } from "../src/astra/looks";
 import { recordVictory } from "../src/astra/route";
 import { newSave, parseSave, type SaveData } from "../src/astra/save";
-import { bring, hatch, release } from "../src/astra/town";
+import { bring, canHatch, fuse, fusePartners, hatch, hatchAll, release, renamePet, slotsOf, toggleLock, upgradeFarm } from "../src/astra/town";
 
 const fresh = () => newSave("Hero", "male", "knight", "tough_skin", defaultLook("male", "knight"));
 const ok = (r: ReturnType<typeof hatch>): SaveData => {
@@ -24,11 +24,14 @@ describe("farm", () => {
   });
   it("refuses a full paddock; release frees a slot and the travelling pet stays home", () => {
     let s = fresh();
-    s.items.pet_egg = PADDOCK + 1;
-    for (let i = 0; i < PADDOCK; i++) s = ok(hatch(s));
+    const slots = slotsOf(s);
+    s.items.pet_egg = slots + 1;
+    const all = hatchAll(s, "pet_egg");
+    expect([all.count, all.why, all.save.items.pet_egg]).toEqual([slots, "คอกเต็มแล้ว", 1]);
+    s = all.save;
     expect(hatch(s).ok).toBe(false);
     s = ok(release(s, 1));
-    expect([s.pets.list.length, s.pets.with]).toEqual([PADDOCK - 1, null]);
+    expect([s.pets.list.length, s.pets.with]).toEqual([slots - 1, null]);
     s = ok(bring(s, 2));
     expect(s.pets.with).toBe(2);
     expect(bring(s, 99).ok).toBe(false);
@@ -40,7 +43,50 @@ describe("farm", () => {
     const old = JSON.parse(JSON.stringify(fresh()));
     delete old.pets;
     delete old.items.pet_egg;
-    expect(parseSave(JSON.stringify(old))?.pets).toEqual({ seq: 0, list: [], with: null });
+    expect(parseSave(JSON.stringify(old))?.pets).toEqual({ seq: 0, list: [], with: null, farm: 0 });
+    expect(parseSave(JSON.stringify(old))?.knowledge).toBe(0);
+  });
+});
+
+describe("farm tiers, lock, rename and fusion", () => {
+  it("rarer eggs need a farm upgrade bought with Knowledge", () => {
+    let s = fresh();
+    s.items.egg_uncommon = 1;
+    expect(canHatch(s, "egg_uncommon")).toBe(false);
+    expect(hatch(s, "egg_uncommon")).toEqual({ ok: false, why: "อัปเกรดฟาร์มก่อน" });
+    expect(upgradeFarm(s).ok).toBe(false);
+    s.knowledge = FARM_TIERS[1].cost + 5;
+    s = ok(upgradeFarm(s));
+    expect([s.knowledge, slotsOf(s)]).toEqual([5, FARM_TIERS[1].slots]);
+    s = ok(hatch(s, "egg_uncommon"));
+    expect(s.pets.list[0].rarity).toBe("uncommon");
+  });
+  it("a locked pet cannot be released or fused away; names follow the hero-name rules", () => {
+    let s = fresh();
+    s.items.pet_egg = 2;
+    s = ok(hatch(ok(hatch(s))));
+    s = ok(toggleLock(s, 2));
+    expect(release(s, 2).ok).toBe(false);
+    s = ok(renamePet(s, 1, "  Rex "));
+    expect(s.pets.list[0].name).toBe("Rex");
+    expect(ok(renamePet(s, 1, "")).pets.list[0].name).toBe("");
+  });
+  it("fusing two of one family and rarity raises the kept one and removes the other", () => {
+    let s = fresh();
+    s.pets.list = [1, 2, 3].map((id) => ({ id, species: "owl" as const, rarity: "common" as const, xp: id * 10, name: "", locked: false }));
+    s.pets.seq = 3;
+    s.pets.with = 2;
+    s.pets.list[2].species = "pup";
+    expect(fusePartners(s, 1).map((p) => p.id)).toEqual([2]);
+    s = ok(fuse(s, 1, 2));
+    expect(s.pets.list.map((p) => [p.id, p.rarity, p.xp])).toEqual([[1, "uncommon", 20], [3, "common", 30]]);
+    expect(s.pets.with).toBe(1);
+    expect(fuse(s, 1, 3).ok).toBe(false);
+  });
+  it("victories add Knowledge equal to the EXP", () => {
+    const s = fresh();
+    const won = recordVictory(s, "r1a");
+    expect(won.knowledge).toBe(won.hero.exp - s.hero.exp);
   });
 });
 

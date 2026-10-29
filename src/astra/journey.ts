@@ -2,12 +2,12 @@
 // area + difficulty), pick the next event from cards, a victory summary after each fight, and a
 // run summary when the journey ends. Game rules live in route.ts and town.ts, and every committed
 // change goes through commit() so it is saved atomically.
-import { ARMOR_IDS, ARMORS, CLASSES, DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, HONE_MAX, HONE_PER, honeCost, ITEMS, LEVEL_EXP, PADDOCK, RARITY_ODDS, PET_IDS, PET_MAX_LEVEL, petBite, petLevel, PETS, RECIPES, STAT_IDS, STAT_LABEL, TRAIN, TRAIN_CAP, TRAIN_IDS, type DifficultyId, type ItemId, type StatId } from "./data";
+import { ARMOR_IDS, ARMORS, CLASSES, DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, HONE_MAX, HONE_PER, honeChance, honeCost, EGG_IDS, EGGS, FARM_TIERS, ITEMS, LEVEL_EXP, RARITY_ODDS, PET_IDS, PET_RARITIES, PET_RARITY, petBite, petLevel, PETS, RECIPES, STAT_IDS, STAT_LABEL, TRAIN, TRAIN_CAP, TRAIN_IDS, TRAIN_PICKS, WEAPON_TIERS, type DifficultyId, type EggId, type ItemId, type StatId } from "./data";
 import { duel } from "./duel";
 import { heroMax } from "./hero";
 import { choices, recordVictory, restartRun, rewardOf, ROUTE, ROUTE_ROWS, runSummary, startRun, visit, type NodeKind } from "./route";
-import { writeSave, type SaveData } from "./save";
-import { bring, craft, forgeArmor, hatch, hone, pointsLeft, release, resetTraining, train, wear, type Change } from "./town";
+import { writeSave, type Pet, type SaveData } from "./save";
+import { bring, canHatch, craft, forgeArmor, forgeWeapon, fuse, fusePartners, hatch, hatchAll, renamePet, slotsOf, toggleLock, upgradeFarm, hone, pointsLeft, release, resetTraining, train, wear, type Change } from "./town";
 import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
 import { button, fitSprites, h, heroSprite, show, store } from "./ui";
 
@@ -46,7 +46,8 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
   let departed = save.progress.path.length > 0;
   let view: View = "town";
   let smithTab: "hone" | "armor" | "craft" = "hone";
-  let farmTab: "pets" | "eggs" = "pets";
+  let farmTab: "yard" | "pets" | "eggs" | "upgrade" = "yard";
+  let pickedPet = 0;
   let esc: () => void = () => void 0;
   const life = new AbortController();
 
@@ -171,7 +172,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
         spot("hall", "ลานฝึก", left ? `แต้มเหลือ ${left}` : "ฝึกค่าสถานะ", "train"),
         spot("gate", "ประตูเมือง", "ออกเดินทาง", "setup"),
         spot("smithy", "ช่างตีเหล็ก", `${CLASSES[save.hero.classId].weapon.thai} +${save.hero.hone}`, "smith"),
-        spot("farm", "ฟาร์ม", `สัตว์เลี้ยง ${save.pets.list.length}/${PADDOCK}${save.items.pet_egg ? ` · ไข่ ${save.items.pet_egg}` : ""}`, "farm"),
+        spot("farm", "ฟาร์ม", `สัตว์เลี้ยง ${save.pets.list.length}/${slotsOf(save)}`, "farm"),
       ),
     );
     el.style.backgroundImage = 'url("town/backdrop.png")';
@@ -206,7 +207,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
         h(
           "div",
           {},
-          h("b", {}, t.name),
+          h("b", {}, t.name, TRAIN_PICKS[save.hero.classId].includes(id) ? h("span", { class: "tag rec" }, "แนะนำ") : ""),
           h("small", {}, t.text),
           h("span", { class: "meter" }, h("progress", { max: TRAIN_CAP, value: n }), `${n} / ${TRAIN_CAP}`),
           h("small", { class: n ? "gain" : "" }, n ? gain(n) : "ยังไม่มีแต้ม"),
@@ -248,23 +249,56 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
       const lv = save.hero.hone;
       const c = honeCost(lv);
       const maxed = lv >= HONE_MAX;
+      const tier = WEAPON_TIERS[save.hero.weapon];
+      const next = WEAPON_TIERS[save.hero.weapon + 1];
+      const chance = honeChance(lv);
       content = [
         h(
           "div",
-          { class: "trow" },
+          { class: `trow armor ${tier.rarity}` },
           h(
             "div",
             {},
-            h("b", {}, `${weapon.name} ${weapon.thai} +${lv}`),
-            h("small", { class: "gain" }, `ATK และ MAG +${lv * HONE_PER}`),
+            h("b", {}, `${weapon.name} ${weapon.thai}${tier.name} +${lv}`),
+            h("small", { class: "gain" }, `ATK และ MAG +${lv * HONE_PER + tier.bonus} (ตีบวก +${lv * HONE_PER} · ขั้นอาวุธ +${tier.bonus})`),
             h("span", { class: "meter" }, h("progress", { max: HONE_MAX, value: lv }), `+${lv} / +${HONE_MAX}`),
-            h("small", { class: "next" }, maxed ? "ตีบวกสูงสุดแล้ว" : `ตีบวก +${lv + 1}: ใช้ ${c.gold} Gold · Wolf Pelt ×${c.wolf_pelt}`),
+            h("small", { class: "next" }, maxed ? "ตีบวกสูงสุดแล้ว" : `ตีบวก +${lv + 1}: ใช้ ${c.gold} Gold · Wolf Pelt ×${c.wolf_pelt} · โอกาสสำเร็จ ${chance}% (พลาดแล้วเสียวัตถุดิบ แต่ระดับไม่ลด)`),
           ),
-          button(maxed ? "สูงสุด" : `ตีบวก +${lv + 1}`, () => act("hone", hone(save), `${weapon.name} +${lv + 1}!`), {
+          button(maxed ? "สูงสุด" : `ตีบวก +${lv + 1} · ${chance}%`, () => {
+            if (doubled("hone")) return;
+            const r = hone(save);
+            if (!r.ok) return toast(r.why);
+            commit(r.save, r.hit ? `${weapon.name} +${lv + 1}!` : `ตีบวกพลาด! ${weapon.name} ยังคง +${lv}`);
+          }, {
             class: "primary",
             disabled: maxed || save.gold < c.gold || save.items.wolf_pelt < c.wolf_pelt,
           }),
         ),
+        h("p", { class: "label" }, "หลอมอาวุธขั้นถัดไป"),
+        ...WEAPON_TIERS.map((t, i) => {
+          const owned = i <= save.hero.weapon;
+          const isNext = t === next;
+          return h(
+            "div",
+            { class: `trow armor ${t.rarity}${i === save.hero.weapon ? " with" : ""}` },
+            h(
+              "div",
+              {},
+              h("b", {}, `${weapon.thai}${t.name}`),
+              h("small", { class: "rarity" }, `${RARITY_THAI(t.rarity)} · ATK และ MAG +${t.bonus}`),
+              t.cost && !owned ? h("small", { class: "next" }, `ใช้ Wolf Pelt ×${t.cost.wolf_pelt} · ${t.cost.gold} Gold · ระดับตีบวกติดไปด้วย`) : "",
+            ),
+            owned
+              ? h("small", { class: "gain" }, i === save.hero.weapon ? "ใช้อยู่" : "✓")
+              : isNext && t.cost
+                ? button("หลอม", () => act("weapon", forgeWeapon(save), `หลอม${weapon.thai}${t.name}แล้ว!`), {
+                    class: "primary",
+                    disabled: save.gold < t.cost.gold || save.items.wolf_pelt < t.cost.wolf_pelt,
+                    aria: { label: `หลอม${weapon.thai}${t.name}` },
+                  })
+                : h("small", {}, "หลอมขั้นก่อนหน้าก่อน"),
+          );
+        }),
       ];
     } else if (smithTab === "armor")
       content = ARMOR_IDS.map((id) => {
@@ -322,69 +356,238 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
       ["ปล่อย", () => {
         const r = release(save, id);
         if (r.ok) commit(r.save, `ปล่อย ${name} แล้ว`);
+        else toast(r.why);
         close();
       }],
     ]);
     esc = close; // Escape must cancel, never release
   }
+  const petLabel = (p: Pet) => p.name || PETS[p.species].name;
+  const RARITY_THAI = (r: string) => RARITY_ODDS.find((o) => o.rarity === r)!.thai;
+  /** A pet sprite cell from pets.png; `big` for the detail portrait. */
+  function petIcon(p: Pet, cls = "") {
+    const el = h("span", { class: `pet-icon ${cls}`, aria: { hidden: "true" } });
+    el.style.backgroundImage = 'url("pets.png")';
+    el.style.backgroundPositionX = `${(PET_IDS.indexOf(p.species) * 100) / (PET_IDS.length - 1)}%`;
+    return el;
+  }
+  function eggIcon(egg: EggId) {
+    const el = h("span", { class: "pet-icon egg", aria: { hidden: "true" } });
+    el.style.backgroundImage = 'url("eggs.png")';
+    el.style.backgroundSize = "300% 100%";
+    el.style.backgroundPositionX = `${(EGG_IDS.indexOf(egg) * 100) / (EGG_IDS.length - 1)}%`;
+    return el;
+  }
+  /** Farm frame (owner reference): tab bar, Knowledge box and close, then the tab's content. */
   function farm() {
-    const tabs = h(
-      "div",
-      { class: "tabs row", role: "group" },
-      ...(["pets", "eggs"] as const).map((t) =>
-        button(t === "pets" ? `สัตว์เลี้ยง ${save.pets.list.length}/${PADDOCK}` : `ไข่ ${save.items.pet_egg}`, () => ((farmTab = t), draw()), {
-          class: farmTab === t ? "on" : "",
-          aria: { pressed: String(farmTab === t) },
-        }),
-      ),
+    const slots = slotsOf(save);
+    const eggs = EGG_IDS.reduce((a, e) => a + save.items[e], 0);
+    const tab = (t: typeof farmTab, label: string) =>
+      button(label, () => ((farmTab = t), draw()), { class: farmTab === t ? "on" : "", aria: { pressed: String(farmTab === t) } });
+    const head = h(
+      "header",
+      { class: "farm-head row" },
+      h("h2", {}, "ฟาร์ม"),
+      h("div", { class: "tabs row", role: "group" }, tab("yard", "คอก"), tab("pets", `สัตว์เลี้ยง ${save.pets.list.length}/${slots}`), tab("eggs", `ไข่ ${eggs}`), tab("upgrade", "อัปเกรด")),
+      h("span", { class: "kn" }, h("small", {}, "ความรู้"), h("b", {}, String(save.knowledge))),
+      button("✕", () => go("town"), { class: "close", aria: { label: "กลับเมือง" } }),
     );
-    let content: Node[];
-    if (farmTab === "eggs")
-      content = [
+    const body = { yard: farmYard, pets: farmPets, eggs: farmEggs, upgrade: farmUpgrade }[farmTab]();
+    return h("section", { class: `farm on-${farmTab}` }, head, body);
+  }
+  function farmYard() {
+    const tier = FARM_TIERS[save.pets.farm];
+    const next = FARM_TIERS[save.pets.farm + 1];
+    const eggs = EGG_IDS.reduce((a, e) => a + save.items[e], 0);
+    const spot = (img: string, name: string, sub: string, t: typeof farmTab, cls: string) => {
+      const b = button("", () => ((farmTab = t), draw()), { class: `bldg ${cls}`, aria: { label: name } });
+      b.append(h("img", { src: `town/${img}.png`, alt: "" }), h("span", { class: "plaque" }, h("b", {}, name), h("small", {}, sub)));
+      return b;
+    };
+    const pen = h(
+      "div",
+      { class: "pen" },
+      ...save.pets.list.map((p, i) => {
+        const b = button("", () => ((farmTab = "pets"), (pickedPet = p.id), draw()), { class: "roam", aria: { label: `${petLabel(p)} Lv.${petLevel(p.xp, p.rarity)}` } });
+        // Spread pets over the pen and give each its own wander pace.
+        b.style.left = `${8 + ((i * 37) % 80)}%`;
+        b.style.top = `${10 + ((i * 53) % 70)}%`;
+        b.style.animationDuration = `${5 + (i % 4)}s`;
+        b.append(...(save.pets.with === p.id ? [h("span", { class: "tag" }, "กับคุณ")] : []), petIcon(p));
+        return b;
+      }),
+    );
+    const el = h(
+      "div",
+      { class: "yard" },
+      h("p", { class: "yard-title" }, `${tier.name} · ${save.pets.list.length} / ${tier.slots} สัตว์เลี้ยง · ฟักไข่${RARITY_THAI(tier.hatch)}`),
+      spot("farm", "ศูนย์ฟักไข่", `${eggs} ฟองรอฟัก`, "eggs", "hatchery"),
+      pen,
+      spot("barn", "โรงนา", next ? `อัปเกรด: ${next.name}` : "ขั้นสูงสุด", "upgrade", "barn"),
+    );
+    el.style.backgroundImage = 'url("town/yard.png")';
+    return el;
+  }
+  function farmPets() {
+    if (!save.pets.list.length) return h("p", { class: "meta" }, "ยังไม่มีสัตว์เลี้ยง ไปที่แท็บไข่เพื่อฟักไข่");
+    const sel = save.pets.list.find((p) => p.id === pickedPet) ?? save.pets.list[0];
+    const list = h(
+      "div",
+      { class: "pet-list rows" },
+      h("p", { class: "label row" }, h("span", {}, "สัตว์เลี้ยงของคุณ"), h("span", {}, `${save.pets.list.length} / ${slotsOf(save)}`)),
+      ...save.pets.list.map((p) => {
+        const lv = petLevel(p.xp, p.rarity);
+        const max = PET_RARITY[p.rarity].max;
+        const b = button("", () => ((pickedPet = p.id), draw()), {
+          class: `pet-row ${p.rarity}${p.id === sel.id ? " on" : ""}`,
+          aria: { pressed: String(p.id === sel.id), label: `${petLabel(p)} ${RARITY_THAI(p.rarity)} Lv.${lv}` },
+        });
+        b.append(
+          petIcon(p),
+          h("span", {}, h("b", {}, petLabel(p)), h("small", {}, `${RARITY_THAI(p.rarity)} · เลเวล ${lv}`), h("progress", { max, value: lv })),
+          save.pets.with === p.id ? h("span", { class: "tag" }, "กับคุณ") : lv >= max ? h("span", { class: "tag max" }, "สูงสุด") : "",
+        );
+        return b;
+      }),
+    );
+    const d = PETS[sel.species];
+    const lv = petLevel(sel.xp, sel.rarity);
+    const max = PET_RARITY[sel.rarity].max;
+    const withMe = save.pets.with === sel.id;
+    const nameIn = h("input", { id: "pet-name", value: sel.name, maxLength: 32, placeholder: d.name, aria: { label: "ชื่อสัตว์เลี้ยง" } });
+    const partners = fusePartners(save, sel.id);
+    const nextRarity = PET_RARITIES[PET_RARITIES.indexOf(sel.rarity) + 1];
+    const detail = h(
+      "div",
+      { class: "pet-detail rows" },
+      h(
+        "div",
+        { class: "pet-top" },
+        h("div", { class: "pet-stage" }, petIcon(sel, "big"), button(sel.locked ? "ปลดล็อค" : "ล็อคสัตว์เลี้ยง", () => act(`lock:${sel.id}`, toggleLock(save, sel.id), sel.locked ? "ปลดล็อคแล้ว" : "ล็อคแล้ว"), { class: "lock" })),
         h(
           "div",
-          { class: "trow" },
-          h("div", {}, h("b", {}, `Pet Egg ×${save.items.pet_egg}`), h("small", {}, "ฟักแล้วได้สัตว์เลี้ยง 1 ตัว: ลูกสุนัข ลูกแมว นกฮูก หรือแอกโซลอเติล"), h("small", { class: "next" }, "บอสท้ายป่าทิ้งไข่ไว้ 1 ฟองทุกครั้งที่ปราบได้")),
-          button("ฟักไข่", () => act("hatch", hatch(save), "ไข่ฟักแล้ว!"), { class: "primary", disabled: !save.items.pet_egg || save.pets.list.length >= PADDOCK }),
-        ),
-      ];
-    else if (!save.pets.list.length) content = [h("p", { class: "meta" }, "ยังไม่มีสัตว์เลี้ยง ไปที่แท็บไข่เพื่อฟักไข่")];
-    else
-      content = save.pets.list.map((p) => {
-        const d = PETS[p.species];
-        const lv = petLevel(p.xp);
-        const next = lv >= PET_MAX_LEVEL ? "สูงสุด" : `${p.xp}/${10 * ((lv + 1) ** 2 - 1)}`;
-        const withMe = save.pets.with === p.id;
-        const icon = h("span", { class: "pet-icon", aria: { hidden: "true" } });
-        icon.style.backgroundImage = 'url("pets.png")';
-        icon.style.backgroundPositionX = `${(PET_IDS.indexOf(p.species) * 100) / (PET_IDS.length - 1)}%`;
-        return h(
-          "div",
-          { class: `trow pet${withMe ? " with" : ""}` },
-          icon,
-          h(
-            "div",
-            {},
-            h("b", {}, `${d.name} · Lv.${lv}`),
-            h("small", {}, `XP ${next} · กัดทุกรอบ ${petBite(lv)} ดาเมจ`),
-            h("small", { class: "gain" }, `${d.ability}: ${d.text} (ทุก 3 รอบ)`),
-          ),
+          {},
+          h("h3", {}, petLabel(sel)),
+          h("p", { class: "tags row" }, h("span", { class: `tag ${sel.rarity}` }, RARITY_THAI(sel.rarity)), h("span", { class: "tag type" }, d.type), withMe ? h("span", { class: "tag" }, "กับคุณ") : ""),
+          h("span", { class: "meter" }, h("b", {}, `เลเวล ${lv} / ${max}`), h("progress", { max, value: lv })),
+          h("small", { class: "gain" }, lv >= max ? "อยู่ในระดับสูงสุดแล้ว ผสานเพื่อเพิ่มความหายากและขีดจำกัด" : `XP ${sel.xp} / ${10 * ((lv + 1) ** 2 - 1)}`),
           h(
             "div",
             { class: "row" },
             withMe
-              ? button("กับคุณ", () => act(`bring:${p.id}`, bring(save, null), `${d.name} อยู่ที่ฟาร์ม`), { class: "on", aria: { pressed: "true", label: `${d.name} กับคุณ` } })
-              : button("พาไปด้วย", () => act(`bring:${p.id}`, bring(save, p.id), `${d.name} ร่วมเดินทาง`), { class: "primary", aria: { label: `พา ${d.name} ไปด้วย` } }),
-            button("ปล่อย", () => confirmRelease(p.id, `${d.name} Lv.${lv}`, d.name), { aria: { label: `ปล่อย ${d.name}` } }),
+              ? button("พักที่ฟาร์ม", () => act(`bring:${sel.id}`, bring(save, null), `${petLabel(sel)} อยู่ที่ฟาร์ม`))
+              : button("พาไปด้วย", () => act(`bring:${sel.id}`, bring(save, sel.id), `${petLabel(sel)} ร่วมเดินทาง`), { class: "primary" }),
+            button("ปล่อย", () => confirmRelease(sel.id, `${petLabel(sel)} Lv.${lv}`, petLabel(sel)), { disabled: sel.locked, aria: { label: `ปล่อย ${petLabel(sel)}` } }),
           ),
-        );
-      });
-    return building(
-      "ฟาร์ม",
-      h("img", { src: "town/farm.png", alt: "" }),
-      "พาสัตว์เลี้ยงไปด้วยได้ 1 ตัว มันกัดศัตรูทุกรอบ ทุก 3 รอบใช้ความสามารถ และโดนโจมตีไม่ได้ ชนะแล้วได้ XP ครึ่งหนึ่งของฮีโร่",
-      tabs,
-      ...content,
+          h(
+            "form",
+            { class: "row rename", onsubmit: (e: Event) => (e.preventDefault(), act(`name:${sel.id}`, renamePet(save, sel.id, nameIn.value), "เปลี่ยนชื่อแล้ว")) },
+            nameIn,
+            h("button", { type: "submit", class: "btn" }, "เปลี่ยนชื่อ"),
+          ),
+        ),
+      ),
+      h("p", { class: "label" }, "ความสามารถ"),
+      h("div", { class: "trow ability" }, h("div", {}, h("b", {}, "กัด · ทุกรอบ"), h("small", {}, `หลังฮีโร่ลงมือทุกครั้ง กัด ${petBite(lv, sel.rarity)} ดาเมจ (ไม่สนใจ DEF) และได้ 1 ชาร์จ ครบ 3 ชาร์จใช้ความสามารถแทน`)), h("small", { class: "gain" }, `พลัง ${PET_RARITY[sel.rarity].power}%`)),
+      h("div", { class: "trow ability on" }, h("div", {}, h("b", {}, d.ability), h("small", {}, d.text)), h("small", { class: "gain" }, "ทุก 3 รอบ")),
+      h(
+        "div",
+        { class: "trow ability" },
+        h("div", {}, h("b", {}, "ผสาน"), h("small", {}, nextRarity ? `ผสานกับ${d.name}ระดับ${RARITY_THAI(sel.rarity)}อีกตัว: ตัวนี้เลื่อนเป็น${RARITY_THAI(nextRarity)} อีกตัวจะหายไป` : "ความหายากสูงสุดแล้ว")),
+        h(
+          "div",
+          { class: "row" },
+          ...(partners.length
+            ? partners.map((o) => button(`ผสานกับ ${petLabel(o)} Lv.${petLevel(o.xp, o.rarity)}`, () => confirmFuse(sel, o), { aria: { label: `ผสาน ${petLabel(sel)} กับ ${petLabel(o)} #${o.id}` } }))
+            : [h("small", {}, nextRarity ? "ยังไม่มีคู่ผสาน" : "")]),
+        ),
+      ),
+    );
+    return h("div", { class: "farm-pets" }, list, detail);
+  }
+  function confirmFuse(keep: Pet, other: Pet) {
+    talk("ผสานสัตว์เลี้ยง", `${petLabel(keep)} จะเลื่อนขั้น และ ${petLabel(other)} Lv.${petLevel(other.xp, other.rarity)} จะหายไป ทำต่อไหม?`, [
+      ["ไม่ผสาน", close],
+      ["ผสาน", () => {
+        const r = fuse(save, keep.id, other.id);
+        if (r.ok) commit(r.save, `${petLabel(keep)} เลื่อนขั้นแล้ว!`);
+        else toast(r.why);
+        close();
+      }],
+    ]);
+    esc = close;
+  }
+  function farmEggs() {
+    const tier = FARM_TIERS[save.pets.farm];
+    const cards = EGG_IDS.filter((e) => save.items[e]).map((e) => {
+      const ok = canHatch(save, e);
+      const n = save.items[e];
+      return h(
+        "div",
+        { class: `egg-card ${EGGS[e]}` },
+        eggIcon(e),
+        h(
+          "div",
+          {},
+          h("p", { class: "row" }, h("b", {}, ITEMS[e].name), h("span", { class: "gain" }, `x${n}`)),
+          h("small", {}, `ฟักแล้วได้สัตว์ระดับ${RARITY_THAI(EGGS[e])}: ลูกสุนัข ลูกแมว นกฮูก หรือแอกโซลอเติล`),
+          ok
+            ? button("ฟัก 1 ฟอง", () => act(`hatch:${e}`, hatch(save, e), "ไข่ฟักแล้ว!"), { class: "primary", aria: { label: `ฟัก ${ITEMS[e].name}` } })
+            : button("อัปเกรดก่อน", () => ((farmTab = "upgrade"), draw())),
+          button(`ฟักทั้งหมด (${n})`, () => {
+            if (doubled(`hatchall:${e}`)) return;
+            const r = hatchAll(save, e);
+            if (!r.count) return toast(r.why);
+            commit(r.save, `ฟักได้ ${r.count} ตัว${r.save.items[e] ? ` · ${r.why}` : ""}`);
+          }, { disabled: !ok, aria: { label: `ฟักทั้งหมด ${ITEMS[e].name}` } }),
+        ),
+      );
+    });
+    return h(
+      "div",
+      { class: "eggs rows" },
+      h(
+        "div",
+        { class: "trow" },
+        h("div", {}, h("b", {}, "ฟักไข่"), h("small", {}, "ฟักทั้งหมดจะหยุดเมื่อคอกเต็ม")),
+        h("small", { class: "gain" }, `ฟักไข่ได้ถึงระดับ${RARITY_THAI(tier.hatch)} · ${save.pets.list.length} / ${tier.slots} ตัว`),
+      ),
+      ...(cards.length ? cards : [h("p", { class: "meta" }, "ยังไม่มีไข่ บอสท้ายป่าทิ้งไข่ไว้ทุกครั้งที่ปราบได้ และหีบบางใบมีไข่หายาก")]),
+    );
+  }
+  function farmUpgrade() {
+    const tiers = FARM_TIERS.map((t, i) => {
+      const cur = i === save.pets.farm;
+      const nxt = i === save.pets.farm + 1;
+      return h(
+        "div",
+        { class: `trow tier${cur ? " with" : ""}${i < save.pets.farm ? " done" : ""}` },
+        h("b", { class: "num" }, String(i + 1)),
+        h("div", {}, h("b", {}, `${t.name}${cur ? " (ของคุณ)" : ""}`), h("small", {}, `${t.slots} ช่องสัตว์เลี้ยง · ฟักไข่${RARITY_THAI(t.hatch)} · ผสานเป็นระดับ${RARITY_THAI(t.hatch)}ขึ้นไปได้`)),
+        cur || i < save.pets.farm
+          ? h("span", { class: "gain" }, "✓")
+          : nxt
+            ? h(
+                "div",
+                {},
+                button(`อัปเกรด ${t.cost}`, () => act("farm-up", upgradeFarm(save), `ฟาร์มเป็น ${t.name} แล้ว!`), { class: "primary", disabled: save.knowledge < t.cost }),
+                save.knowledge < t.cost ? h("small", { class: "need" }, `ต้องการอีก ${t.cost - save.knowledge}`) : "",
+              )
+            : h("small", {}, `${t.cost.toLocaleString()} KN`),
+      );
+    });
+    const how = [
+      "พาสัตว์เลี้ยงไปด้วยได้ 1 ตัว มันกัดทุกรอบ และใช้ความสามารถทุก 3 รอบ ศัตรูทำร้ายมันไม่ได้",
+      "สัตว์ที่อยู่กับคุณได้ XP ครึ่งหนึ่งของฮีโร่จากทุกชัยชนะ",
+      "ความหายากกำหนดเลเวลสูงสุดและพลังของการกัดและความสามารถ",
+      "ผสานสัตว์ชนิดเดียวกันที่ความหายากเท่ากัน: ตัวหนึ่งเลื่อนขั้น อีกตัวหายไป",
+      "ความรู้ได้มาพร้อม EXP จากทุกการต่อสู้ที่ชนะ ใช้อัปเกรดฟาร์ม",
+    ];
+    return h(
+      "div",
+      { class: "farm-upgrade" },
+      h("div", { class: "rows" }, h("p", { class: "label row" }, h("span", {}, "อัปเกรดฟาร์ม"), h("span", {}, "จ่ายด้วยความรู้")), ...tiers),
+      h("div", { class: "how" }, h("b", {}, "วิธีการทำงานของสัตว์เลี้ยง"), h("ul", {}, ...how.map((t) => h("li", {}, t)))),
     );
   }
 
@@ -442,12 +645,13 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
   // ---------- summaries ----------
   function victory(before: SaveData, id: string) {
     const r = rewardOf(before, id);
-    const lines = [`+${r.gold} Gold`, `+${r.exp} EXP`, ...(r.item ? [`${ITEMS[r.item].name} ×1`] : [])];
+    const lines = [`+${r.gold} Gold`, `+${r.exp} EXP · ความรู้ +${r.exp}`, ...(r.item ? [`${ITEMS[r.item].name} ×1`] : [])];
     if (save.hero.level > before.hero.level) lines.push(`เลเวลอัป! Lv.${save.hero.level} (${levelGains(before, save)})`);
     const pet = save.pets.list.find((p) => p.id === save.pets.with);
     if (pet && r.petXp) {
-      const was = petLevel(pet.xp - r.petXp);
-      lines.push(`${PETS[pet.species].name} +${r.petXp} XP สัตว์เลี้ยง${petLevel(pet.xp) > was ? ` · เลเวลอัป Lv.${petLevel(pet.xp)}` : ""}`);
+      const was = petLevel(pet.xp - r.petXp, pet.rarity);
+      const now = petLevel(pet.xp, pet.rarity);
+      lines.push(`${pet.name || PETS[pet.species].name} +${r.petXp} XP สัตว์เลี้ยง${now > was ? ` · เลเวลอัป Lv.${now}` : ""}`);
     }
     if (save.hero.level > before.hero.level) lines.push(`แต้มฝึก +${save.hero.level - before.hero.level} · ใช้ได้ที่ลานฝึกในเมือง`);
     talk("ชัยชนะ!", "", [["ดำเนินต่อ", () => (save.progress.path.at(-1) === "boss" ? ended(save) : close())]], lines);

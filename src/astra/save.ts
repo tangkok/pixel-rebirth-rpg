@@ -4,14 +4,17 @@ import {
   type DifficultyId,
   GENDERS,
   HONE_MAX,
+  WEAPON_TIERS,
   ITEMS,
   ARMOR_IDS,
   type ArmorId,
   MAX_LEVEL,
   STARTER_ARMOR,
-  PADDOCK,
+  FARM_TIERS,
   PET_IDS,
+  PET_RARITIES,
   type PetId,
+  type PetRarity,
   STARTING_ITEMS,
   TRAIN_CAP,
   TRAIN_IDS,
@@ -46,6 +49,8 @@ export interface SaveData {
     train: Training;
     /** Blacksmith hone level of the class weapon, 0 to HONE_MAX. */
     hone: number;
+    /** Forged tier of the class weapon, an index into WEAPON_TIERS. */
+    weapon: number;
     /** Armour worn, and every set owned (forged at the blacksmith; the tunic is the start). */
     armor: ArmorId;
     armors: ArmorId[];
@@ -60,8 +65,10 @@ export interface SaveData {
     /** Difficulty of the current journey, chosen before its first step. */
     diff: DifficultyId;
   };
-  /** Farm: hatched pets (`seq` numbers them, so ids never repeat) and the one travelling along. */
-  pets: { seq: number; list: Pet[]; with: number | null };
+  /** Knowledge (owner reference currency): earned with EXP from every won fight, spent on farm upgrades. */
+  knowledge: number;
+  /** Farm: hatched pets (`seq` numbers them, so ids never repeat), the one travelling along, and the farm tier (FARM_TIERS index). */
+  pets: { seq: number; list: Pet[]; with: number | null; farm: number };
   /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
   trade: { seq: number; kael: Partial<Record<ItemId, number>> };
   savedAt: number;
@@ -70,7 +77,12 @@ export interface SaveData {
 export interface Pet {
   id: number;
   species: PetId;
+  rarity: PetRarity;
   xp: number;
+  /** Player-given name; the species name shows when empty. */
+  name: string;
+  /** A locked pet cannot be released or fused away. */
+  locked: boolean;
 }
 
 export interface Settings {
@@ -90,16 +102,18 @@ export function newSave(
   const s = heroMax({ classId, talentId, level: 1, train, hone: 0, armor: STARTER_ARMOR });
   return {
     version: SAVE_VERSION,
-    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0, armor: STARTER_ARMOR, armors: [STARTER_ARMOR] },
+    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0, weapon: 0, armor: STARTER_ARMOR, armors: [STARTER_ARMOR] },
     items: { ...STARTING_ITEMS },
     gold: 0,
+    knowledge: 0,
     progress: freshProgress(),
-    pets: { seq: 0, list: [], with: null },
+    pets: freshPets(),
     trade: freshTrade(),
     savedAt: Date.now(),
   };
 }
 
+const freshPets = (): SaveData["pets"] => ({ seq: 0, list: [], with: null, farm: 0 });
 const freshProgress = (): SaveData["progress"] => ({ path: [], wins: 0, diff: "normal" });
 const freshTrade = (): SaveData["trade"] => ({ seq: 0, kael: { ...KAEL_STOCK } });
 
@@ -147,13 +161,15 @@ export function parseSave(raw: string | null): SaveData | null {
   if (Object.values(train).reduce((a, n) => a + n, 0) > h.level - 1) return null;
   const hone = h.hone ?? 0;
   if (!isInt(hone, 0, HONE_MAX)) return null;
+  const weapon = h.weapon ?? 0;
+  if (!isInt(weapon, 0, WEAPON_TIERS.length - 1)) return null;
   // Saves from before armour wore the tunic.
   const armors = h.armors ?? [STARTER_ARMOR];
   if (!Array.isArray(armors) || !armors.length || armors.length > ARMOR_IDS.length || new Set(armors).size !== armors.length) return null;
   if (!armors.every((a) => ARMOR_IDS.includes(a as ArmorId))) return null;
   const armor = h.armor ?? STARTER_ARMOR;
   if (!armors.includes(armor)) return null;
-  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone, armor: armor as ArmorId });
+  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone, weapon, armor: armor as ArmorId });
   if (!isInt(h.hp, 0, max.maxHp) || !isInt(h.mp, 0, max.maxMp)) return null;
 
   const itemIds = Object.keys(ITEMS) as ItemId[];
@@ -181,8 +197,10 @@ export function parseSave(raw: string | null): SaveData | null {
     kael[id] = (stock[id] as number | undefined) ?? 0;
   }
   if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
-  const pets = parsePets(d.pets ?? { seq: 0, list: [], with: null }); // saves from before the farm
+  const pets = parsePets(d.pets ?? freshPets()); // saves from before the farm
   if (!pets) return null;
+  const knowledge = d.knowledge ?? 0;
+  if (!isInt(knowledge, 0, 1e9)) return null;
 
   return {
     version: SAVE_VERSION,
@@ -198,11 +216,13 @@ export function parseSave(raw: string | null): SaveData | null {
       mp: h.mp,
       train,
       hone,
+      weapon,
       armor: armor as ArmorId,
       armors: [...(armors as ArmorId[])],
     },
     items: bag,
     gold: d.gold,
+    knowledge,
     progress: { path: [...(path as string[])], wins: p.wins, diff: diff as DifficultyId },
     pets,
     trade: { seq: t.seq, kael },
@@ -211,16 +231,26 @@ export function parseSave(raw: string | null): SaveData | null {
 }
 
 function parsePets(v: unknown): SaveData["pets"] | null {
-  if (!isObj(v) || !isInt(v.seq, 0, 1e9) || !Array.isArray(v.list) || v.list.length > PADDOCK) return null;
+  const farm = isObj(v) ? (v.farm ?? 0) : null; // pets from before farm upgrades sit in the first paddock
+  if (!isObj(v) || !isInt(farm, 0, FARM_TIERS.length - 1) || !isInt(v.seq, 0, 1e9) || !Array.isArray(v.list)) return null;
+  if (v.list.length > FARM_TIERS[farm].slots) return null;
   const list: Pet[] = [];
   for (const p of v.list) {
     if (!isObj(p) || !isInt(p.id, 1, v.seq) || !PET_IDS.includes(p.species as PetId) || !isInt(p.xp, 0, 1e7)) return null;
+    const rarity = p.rarity ?? "common";
+    const name = p.name ?? "";
+    const locked = p.locked ?? false;
+    if (!PET_RARITIES.includes(rarity as PetRarity) || typeof locked !== "boolean") return null;
+    if (name !== "") {
+      const c = checkName(name);
+      if (!c.ok || c.name !== name) return null;
+    }
     if (list.some((q) => q.id === p.id)) return null;
-    list.push({ id: p.id, species: p.species as PetId, xp: p.xp });
+    list.push({ id: p.id, species: p.species as PetId, rarity: rarity as PetRarity, xp: p.xp, name: name as string, locked });
   }
   const w = v.with;
   if (w !== null && !list.some((p) => p.id === w)) return null;
-  return { seq: v.seq, list, with: w as number | null };
+  return { seq: v.seq, list, with: w as number | null, farm };
 }
 
 /**

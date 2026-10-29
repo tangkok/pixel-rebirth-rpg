@@ -2,7 +2,8 @@
 
 Usage: python3 -I scripts/draw-pets.py
 Writes public/astra/pets.png: one 20x16 frame per pet in PET_IDS order (pup, kitten, owl,
-axolotl). Each pet is an ASCII map below; '.' is transparent. Requires Pillow.
+axolotl), and public/astra/eggs.png: one 20x16 frame per egg (common, uncommon, rare).
+Each sprite is an ASCII map below; '.' is transparent. Requires Pillow.
 """
 from pathlib import Path
 
@@ -21,6 +22,10 @@ PALETTE = {
     "o": "#f0962c", "O": "#c46a18", "y": "#ffd8a0",
     # owl
     "g": "#8a7458", "G": "#5e4c38", "f": "#d8c8a0", "Y": "#f4c430",
+    # eggs: shell light / shell / spots ("3" is also the stand)
+    "1": "#f4ecd8", "2": "#d8c8a8", "3": "#a8946c",
+    "4": "#d8f4d0", "5": "#9ad890", "6": "#4a9a5a",
+    "7": "#d8e4ff", "8": "#9ab4f4", "9": "#4a64c8",
     # axolotl
     "p": "#f4a0c0", "P": "#d86a98", "r": "#e84a7a", "q": "#ffd0e0",
 }
@@ -102,6 +107,27 @@ kPPkkk...kpppppppk..
 """
 
 
+EGG = """
+....................
+........kkkk........
+.......kAAAAk.......
+......kAAABBBk......
+......kAABBCBk......
+.....kAABBBBBBk.....
+.....kABCBBBBBk.....
+.....kABBBBCBBk.....
+.....kBBBBBBBBk.....
+.....kBBCBBBBBk.....
+......kBBBBCBk......
+......kBBBBBBk......
+.......kkkkkk.......
+.....kkkkkkkkkk.....
+.....k33333333k.....
+.....kkkkkkkkkk.....
+"""
+EGG_COLORS = ("123", "456", "789")
+
+
 def sprite(art: str) -> Image.Image:
     rows = [r for r in art.strip("\n").split("\n")]
     assert len(rows) == H and all(len(r) == W for r in rows), [len(r) for r in rows]
@@ -119,7 +145,11 @@ def main():
     for i, art in enumerate(pets):
         sheet.paste(sprite(art), (i * W, 0))
     sheet.save(OUT)
-    print("wrote", OUT)
+    eggs = Image.new("RGBA", (W * len(EGG_COLORS), H))
+    for i, (a, b, c) in enumerate(EGG_COLORS):
+        eggs.paste(sprite(EGG.replace("A", a).replace("B", b).replace("C", c)), (i * W, 0))
+    eggs.save(OUT.with_name("eggs.png"))
+    print("wrote", OUT, OUT.with_name("eggs.png"))
 
 
 if __name__ == "__main__":

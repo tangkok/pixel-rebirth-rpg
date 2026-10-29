@@ -177,7 +177,9 @@ export const ITEMS = {
   /** Forest Wolf drop (LOOT_DROP_SYSTEM); a trade material, never usable in battle. */
   wolf_pelt: { name: "Wolf Pelt", material: true },
   /** Hatched at the farm (owner reference); the boss leaves one. Never usable in battle. */
-  pet_egg: { name: "Pet Egg", material: true },
+  pet_egg: { name: "ไข่ทั่วไป", material: true },
+  egg_uncommon: { name: "ไข่ไม่ธรรมดา", material: true },
+  egg_rare: { name: "ไข่หายาก", material: true },
 } as const;
 export type ItemId = keyof typeof ITEMS;
 export const STARTING_ITEMS: Record<ItemId, number> = {
@@ -187,6 +189,8 @@ export const STARTING_ITEMS: Record<ItemId, number> = {
   storm_vial: 1,
   wolf_pelt: 0,
   pet_egg: 1,
+  egg_uncommon: 0,
+  egg_rare: 0,
 }; // PLACEHOLDER
 
 /**
@@ -225,11 +229,31 @@ export const TRAIN = {
 export type TrainId = keyof typeof TRAIN;
 export const TRAIN_IDS = Object.keys(TRAIN) as TrainId[];
 export const TRAIN_CAP = 10;
+/** Training lines tagged "แนะนำ" per class (owner reference), the ones its skill and role lean on. */
+export const TRAIN_PICKS: Record<ClassId, TrainId[]> = {
+  knight: ["guard", "vitality"],
+  ranger: ["agility", "strength"],
+  sorcerer: ["arcane", "focus"],
+  cleric: ["arcane", "vitality"],
+  berserk: ["strength", "vitality"],
+};
 
 /** PLACEHOLDER blacksmith: honing the class weapon to +HONE_MAX, each level ATK and MAG +2 (flat). */
 export const HONE_MAX = 10;
 export const HONE_PER = 2;
 export const honeCost = (level: number) => ({ gold: 20 * (level + 1), wolf_pelt: level + 1 });
+/** Hone success percent for the next level (owner reference: 95% at the start, harder each level). */
+export const honeChance = (level: number) => Math.max(25, 95 - 8 * level);
+/**
+ * PLACEHOLDER weapon tiers of the class weapon (owner reference: weapons forged from materials).
+ * Each tier adds flat ATK and MAG on top of the hone; the hone level carries over.
+ */
+export const WEAPON_TIERS = [
+  { name: "เหล็กธรรมดา", rarity: "common", bonus: 0, cost: null },
+  { name: "เหล็กกล้า", rarity: "uncommon", bonus: 4, cost: { wolf_pelt: 4, gold: 80 } },
+  { name: "มิธริล", rarity: "rare", bonus: 8, cost: { wolf_pelt: 8, gold: 250 } },
+  { name: "อดามันไทต์", rarity: "epic", bonus: 14, cost: { wolf_pelt: 12, gold: 600 } },
+] as const satisfies readonly { name: string; rarity: string; bonus: number; cost: { wolf_pelt: number; gold: number } | null }[];
 /** PLACEHOLDER blacksmith crafts: Wolf Pelt and Gold into battle items. */
 export const RECIPES: Partial<Record<ItemId, { wolf_pelt: number; gold: number }>> = {
   potion: { wolf_pelt: 1, gold: 5 },
@@ -243,20 +267,44 @@ export const RECIPES: Partial<Record<ItemId, { wolf_pelt: number; gold: number }
  * (it cannot be hurt), and every PET_CHARGE bites uses its ability instead of waiting.
  */
 export const PETS = {
-  pup: { name: "ลูกสุนัข", ability: "เห่าขู่", text: "ศัตรู ATK −15% ในการโจมตีครั้งถัดไป" },
-  kitten: { name: "ลูกแมวลายส้ม", ability: "ข่วนรัว", text: "ข่วน 3 ครั้งติด ดาเมจ ×3" },
-  owl: { name: "นกฮูกตาโต", ability: "ตาเฉียบ", text: "Astra +25" },
-  axolotl: { name: "แอกโซลอเติล", ability: "รักษา", text: "ฟื้น HP 6% ของ MaxHP" },
+  pup: { name: "ลูกสุนัข", type: "สัตว์บก", ability: "เห่าขู่", text: "ศัตรู ATK −15% ในการโจมตีครั้งถัดไป" },
+  kitten: { name: "ลูกแมวลายส้ม", type: "สัตว์บก", ability: "ข่วนรัว", text: "ข่วนรัว ดาเมจ ×3 ของการกัด" },
+  owl: { name: "นกฮูกตาโต", type: "นก", ability: "ตาเฉียบ", text: "Astra +25" },
+  axolotl: { name: "แอกโซลอเติล", type: "สัตว์น้ำ", ability: "รักษา", text: "ฟื้น HP 6% ของ MaxHP ×พลังความหายาก" },
 } as const;
 export type PetId = keyof typeof PETS;
 export const PET_IDS = Object.keys(PETS) as PetId[];
 export const PET_CHARGE = 3;
-export const PADDOCK = 6;
-export const PET_MAX_LEVEL = 30;
-/** Bite damage ignores DEF: a small flat hit that grows with the pet's level. */
-export const petBite = (level: number) => 2 + Math.floor(level / 2);
-/** Pet level from its XP, on the hero curve 10 × (L² − 1) up to PET_MAX_LEVEL. */
-export const petLevel = (xp: number) => Math.min(PET_MAX_LEVEL, Math.floor(Math.sqrt(xp / 10 + 1)));
+/** PLACEHOLDER pet rarities (owner reference): rarer pets level higher and hit harder (percent power). */
+export const PET_RARITY = {
+  common: { max: 30, power: 100 },
+  uncommon: { max: 35, power: 125 },
+  rare: { max: 40, power: 150 },
+  epic: { max: 45, power: 180 },
+  legendary: { max: 50, power: 220 },
+} as const;
+export type PetRarity = keyof typeof PET_RARITY;
+export const PET_RARITIES = Object.keys(PET_RARITY) as PetRarity[];
+/**
+ * PLACEHOLDER farm upgrades (owner reference), paid in Knowledge: each tier adds paddock slots and
+ * lets eggs of the next rarity hatch.
+ */
+export const FARM_TIERS = [
+  { name: "พาดด็อก", slots: 6, hatch: "common", cost: 0 },
+  { name: "ฟาร์มสเตด", slots: 10, hatch: "uncommon", cost: 300 },
+  { name: "คอกสัตว์", slots: 15, hatch: "rare", cost: 1000 },
+  { name: "แกรนด์แรนช์", slots: 20, hatch: "epic", cost: 3000 },
+  { name: "ฟาร์มสวรรค์", slots: 30, hatch: "legendary", cost: 8000 },
+] as const satisfies readonly { name: string; slots: number; hatch: PetRarity; cost: number }[];
+export const PADDOCK = FARM_TIERS.at(-1)!.slots;
+/** Eggs in the bag and the rarity they hatch into. */
+export const EGGS = { pet_egg: "common", egg_uncommon: "uncommon", egg_rare: "rare" } as const satisfies Partial<Record<ItemId, PetRarity>>;
+export type EggId = keyof typeof EGGS;
+export const EGG_IDS = Object.keys(EGGS) as EggId[];
+/** Bite damage ignores DEF: a small flat hit that grows with level and rarity. */
+export const petBite = (level: number, rarity: PetRarity = "common") => Math.floor(((2 + Math.floor(level / 2)) * PET_RARITY[rarity].power) / 100);
+/** Pet level from its XP, on the hero curve 10 × (L² − 1), up to its rarity's cap. */
+export const petLevel = (xp: number, rarity: PetRarity = "common") => Math.min(PET_RARITY[rarity].max, Math.floor(Math.sqrt(xp / 10 + 1)));
 /** One frame of public/astra/pets.png (scripts/draw-pets.py), in PET_IDS order. */
 export const PET_W = 20;
 export const PET_H = 16;

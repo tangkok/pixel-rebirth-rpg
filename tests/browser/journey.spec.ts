@@ -191,8 +191,8 @@ test("the town's hall spends level points and the smith hones and crafts", async
   await page.getByRole("button", { name: "กลับเมือง" }).click();
   await page.getByRole("button", { name: "ช่างตีเหล็ก" }).click();
   await expectNoScroll(page);
-  await page.getByRole("button", { name: "ตีบวก +1" }).click();
-  await expect(page.locator(".building")).toContainText("Axe ขวาน +1");
+  await page.getByRole("button", { name: /^ตีบวก \+1 · 95%/ }).click(); // this save's roll is a hit
+  await expect(page.locator(".building")).toContainText("Axe ขวานเหล็กธรรมดา +1");
   await page.getByRole("button", { name: "หัตถกรรม" }).click();
   await page.getByRole("button", { name: "สร้าง Potion" }).click();
   await page.getByRole("button", { name: "ชุดเกราะ" }).click();
@@ -212,18 +212,26 @@ test("the farm hatches the egg and the pet bites in battle", async ({ page }) =>
   await patch(page, "");
   await page.getByRole("button", { name: "ฟาร์ม" }).click();
   await expectNoScroll(page);
-  await page.getByRole("button", { name: "ไข่ 1" }).click();
-  await page.getByRole("button", { name: "ฟักไข่" }).dblclick(); // double tap = one egg
+  await page.getByRole("button", { name: "ไข่ 1", exact: true }).click();
+  await page.getByRole("button", { name: "ฟัก ไข่ทั่วไป" }).dblclick(); // double tap = one egg
+  await page.getByRole("button", { name: "คอก", exact: true }).click();
+  await expect(page.locator(".roam")).toHaveCount(1);
   await page.getByRole("button", { name: /^สัตว์เลี้ยง 1\/6/ }).click();
-  await expect(page.locator(".trow.pet.with")).toHaveCount(1);
+  await expectNoScroll(page);
+  await expect(page.locator(".pet-row.on")).toContainText("กับคุณ");
+  await page.locator("#pet-name").fill("Rex");
+  await page.getByRole("button", { name: "เปลี่ยนชื่อ" }).click();
+  await expect(page.locator(".pet-detail h3")).toHaveText("Rex");
+  await page.getByRole("button", { name: "ล็อคสัตว์เลี้ยง" }).click();
+  await expect(page.getByRole("button", { name: "ปล่อย Rex" })).toBeDisabled();
   const s = await saved(page);
-  expect([s.items.pet_egg, s.pets.list.length, s.pets.with]).toEqual([0, 1, 1]);
+  expect([s.items.pet_egg, s.pets.list.length, s.pets.with, s.pets.list[0].name, s.pets.list[0].locked]).toEqual([0, 1, 1, "Rex", true]);
   await page.getByRole("button", { name: "กลับเมือง" }).click();
   await page.getByRole("button", { name: "ประตูเมือง" }).click();
   await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
   await node(page, "r1a").click();
   await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
-  await expect(page.locator(".log")).toContainText("ใช้ กัด", { timeout: 10_000 });
+  await expect(page.locator(".log")).toContainText("Rex ใช้ กัด", { timeout: 10_000 });
 });
 
 for (const size of SIZES) {

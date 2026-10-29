@@ -1,8 +1,8 @@
 // The town between journeys (owner reference): a training hall that spends stat points, a
 // blacksmith that hones the class weapon or crafts battle items, and a farm that hatches pets.
 // Pure, all-or-nothing changes over SaveData like trade.ts; journey.ts only draws and forwards taps.
-import { ARMORS, HONE_MAX, honeCost, ITEMS, PADDOCK, PET_IDS, RECIPES, TRAIN_CAP, type ArmorId, type ItemId, type TrainId } from "./data";
-import { heroMax, noTraining } from "./hero";
+import { ARMORS, EGGS, FARM_TIERS, HONE_MAX, honeChance, honeCost, ITEMS, PET_IDS, PET_RARITIES, RECIPES, TRAIN_CAP, WEAPON_TIERS, type ArmorId, type EggId, type ItemId, type TrainId } from "./data";
+import { checkName, heroMax, noTraining } from "./hero";
 import { ITEM_CAP } from "./route";
 import type { SaveData } from "./save";
 
@@ -40,8 +40,12 @@ export function resetTraining(s: SaveData): Change {
   return { ok: true, save: clamp(n) };
 }
 
-/** Hones the weapon one level for Gold and Wolf Pelts (PLACEHOLDER: always succeeds). */
-export function hone(s: SaveData): Change {
+/**
+ * Tries to hone the weapon one level for Gold and Wolf Pelts; on a miss the materials are spent and
+ * the level stays. The roll comes from the save itself, so reloading cannot reroll it (each try
+ * spends Gold, which changes the next roll).
+ */
+export function hone(s: SaveData): { ok: true; save: SaveData; hit: boolean } | { ok: false; why: string } {
   if (s.hero.hone >= HONE_MAX) return { ok: false, why: `ตีบวกสูงสุด +${HONE_MAX} แล้ว` };
   const c = honeCost(s.hero.hone);
   if (s.gold < c.gold) return { ok: false, why: "Gold ไม่พอ" };
@@ -49,7 +53,23 @@ export function hone(s: SaveData): Change {
   const n = clone(s);
   n.gold -= c.gold;
   n.items.wolf_pelt -= c.wolf_pelt;
-  n.hero.hone += 1;
+  let hash = s.gold * 7 + s.items.wolf_pelt * 13 + s.hero.hone * 101;
+  for (const ch of s.hero.name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const hit = hash % 100 < honeChance(s.hero.hone);
+  if (hit) n.hero.hone += 1;
+  return { ok: true, save: n, hit };
+}
+
+/** Forges the class weapon into its next tier; the hone level carries over. */
+export function forgeWeapon(s: SaveData): Change {
+  const c = WEAPON_TIERS[s.hero.weapon + 1]?.cost;
+  if (!c) return { ok: false, why: "อาวุธขั้นสูงสุดแล้ว" };
+  if (s.gold < c.gold) return { ok: false, why: "Gold ไม่พอ" };
+  if (s.items.wolf_pelt < c.wolf_pelt) return { ok: false, why: "Wolf Pelt ไม่พอ" };
+  const n = clone(s);
+  n.gold -= c.gold;
+  n.items.wolf_pelt -= c.wolf_pelt;
+  n.hero.weapon += 1;
   return { ok: true, save: n };
 }
 
@@ -90,21 +110,51 @@ export function wear(s: SaveData, id: ArmorId): Change {
   return { ok: true, save: clamp(n) };
 }
 
+/** Paddock slots at the farm's current tier. */
+export const slotsOf = (s: SaveData) => FARM_TIERS[s.pets.farm].slots;
+/** True when the farm tier is high enough to hatch this egg's rarity. */
+export const canHatch = (s: SaveData, egg: EggId) =>
+  PET_RARITIES.indexOf(EGGS[egg]) <= PET_RARITIES.indexOf(FARM_TIERS[s.pets.farm].hatch);
+
 /**
- * Hatches one Pet Egg into the paddock. The species comes from the hero name and egg count, so a
- * reload can never reroll it (PLACEHOLDER: all four are equally likely, no rarities yet).
+ * Hatches one egg into the paddock. The species comes from the hero name and egg count, so a
+ * reload can never reroll it (PLACEHOLDER: all four species are equally likely).
  */
-export function hatch(s: SaveData): Change {
-  if (s.items.pet_egg < 1) return { ok: false, why: "ไม่มีไข่" };
-  if (s.pets.list.length >= PADDOCK) return { ok: false, why: "คอกเต็มแล้ว" };
+export function hatch(s: SaveData, egg: EggId = "pet_egg"): Change {
+  if (!(egg in EGGS) || s.items[egg] < 1) return { ok: false, why: "ไม่มีไข่" };
+  if (!canHatch(s, egg)) return { ok: false, why: "อัปเกรดฟาร์มก่อน" };
+  if (s.pets.list.length >= slotsOf(s)) return { ok: false, why: "คอกเต็มแล้ว" };
   const n = clone(s);
   const id = n.pets.seq + 1;
   let hash = id;
   for (const c of n.hero.name) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-  n.items.pet_egg -= 1;
+  n.items[egg] -= 1;
   n.pets.seq = id;
-  n.pets.list.push({ id, species: PET_IDS[hash % PET_IDS.length], xp: 0 });
+  n.pets.list.push({ id, species: PET_IDS[hash % PET_IDS.length], rarity: EGGS[egg], xp: 0, name: "", locked: false });
   if (n.pets.with === null) n.pets.with = id; // the first pet comes along straight away
+  return { ok: true, save: n };
+}
+
+/** Open All: hatches eggs of one kind until none are left or the paddock is full. */
+export function hatchAll(s: SaveData, egg: EggId): { save: SaveData; count: number; why: string } {
+  let cur = s;
+  let count = 0;
+  for (;;) {
+    const r = hatch(cur, egg);
+    if (!r.ok) return { save: cur, count, why: r.why };
+    cur = r.save;
+    count += 1;
+  }
+}
+
+/** Buys the next farm tier with Knowledge. */
+export function upgradeFarm(s: SaveData): Change {
+  const next = FARM_TIERS[s.pets.farm + 1];
+  if (!next) return { ok: false, why: "ฟาร์มขั้นสูงสุดแล้ว" };
+  if (s.knowledge < next.cost) return { ok: false, why: `ต้องการความรู้อีก ${next.cost - s.knowledge}` };
+  const n = clone(s);
+  n.knowledge -= next.cost;
+  n.pets.farm += 1;
   return { ok: true, save: n };
 }
 
@@ -116,12 +166,56 @@ export function bring(s: SaveData, id: number | null): Change {
   return { ok: true, save: n };
 }
 
-/** Lets a pet go to free a paddock slot. */
+/** Lets a pet go to free a paddock slot; a locked pet stays. */
 export function release(s: SaveData, id: number): Change {
   const pet = s.pets.list.find((p) => p.id === id);
   if (!pet) return { ok: false, why: "ไม่มีสัตว์ตัวนี้" };
+  if (pet.locked) return { ok: false, why: "สัตว์ตัวนี้ถูกล็อคอยู่" };
   const n = clone(s);
   n.pets.list = n.pets.list.filter((p) => p.id !== id);
   if (n.pets.with === id) n.pets.with = null;
+  return { ok: true, save: n };
+}
+
+/** Locks or unlocks a pet against release and fusion. */
+export function toggleLock(s: SaveData, id: number): Change {
+  if (!s.pets.list.some((p) => p.id === id)) return { ok: false, why: "ไม่มีสัตว์ตัวนี้" };
+  const n = clone(s);
+  const p = n.pets.list.find((q) => q.id === id)!;
+  p.locked = !p.locked;
+  return { ok: true, save: n };
+}
+
+/** Names a pet (same rules as the hero name); an empty name goes back to the species name. */
+export function renamePet(s: SaveData, id: number, raw: string): Change {
+  if (!s.pets.list.some((p) => p.id === id)) return { ok: false, why: "ไม่มีสัตว์ตัวนี้" };
+  let name = "";
+  if (raw.trim()) {
+    const c = checkName(raw);
+    if (!c.ok) return { ok: false, why: c.error };
+    name = c.name;
+  }
+  const n = clone(s);
+  n.pets.list.find((q) => q.id === id)!.name = name;
+  return { ok: true, save: n };
+}
+
+/** Partners `keep` can fuse with: same species and rarity, not locked, below legendary. */
+export const fusePartners = (s: SaveData, keep: number) => {
+  const k = s.pets.list.find((p) => p.id === keep);
+  if (!k || k.rarity === "legendary") return [];
+  return s.pets.list.filter((p) => p.id !== keep && p.species === k.species && p.rarity === k.rarity && !p.locked);
+};
+
+/** Fuses two pets of one family and rarity: `keep` rises one rarity with the higher XP, `other` is gone. */
+export function fuse(s: SaveData, keep: number, other: number): Change {
+  if (!fusePartners(s, keep).some((p) => p.id === other)) return { ok: false, why: "ผสานคู่นี้ไม่ได้" };
+  const n = clone(s);
+  const k = n.pets.list.find((p) => p.id === keep)!;
+  const o = n.pets.list.find((p) => p.id === other)!;
+  k.rarity = PET_RARITIES[PET_RARITIES.indexOf(k.rarity) + 1];
+  k.xp = Math.max(k.xp, o.xp);
+  n.pets.list = n.pets.list.filter((p) => p.id !== other);
+  if (n.pets.with === other) n.pets.with = keep;
   return { ok: true, save: n };
 }

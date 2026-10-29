@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { startBattle } from "../src/astra/battle";
-import { LEVEL_EXP, MAX_LEVEL } from "../src/astra/data";
+import { honeChance, LEVEL_EXP, MAX_LEVEL, WEAPON_TIERS } from "../src/astra/data";
 import { heroMax } from "../src/astra/hero";
 import { defaultLook } from "../src/astra/looks";
-import { craft, forgeArmor, hone, pointsLeft, resetTraining, train, wear } from "../src/astra/town";
+import { craft, forgeArmor, forgeWeapon, hone, pointsLeft, resetTraining, train, wear } from "../src/astra/town";
 import { newSave, parseSave, type SaveData } from "../src/astra/save";
 
 const at = (level: number, extra: (s: SaveData) => void = () => {}): SaveData => {
@@ -63,6 +63,29 @@ describe("blacksmith", () => {
     expect([h.hero.hone, h.gold, h.items.wolf_pelt]).toEqual([1, 80, 2]);
     expect(heroMax(h.hero).atk).toBeGreaterThan(heroMax(s.hero).atk);
     expect(hone(at(1)).ok).toBe(false); // no Gold
+  });
+  it("a hone can miss: the materials are spent, the level stays, and the odds fall per level", () => {
+    expect([honeChance(0), honeChance(5), honeChance(9)]).toEqual([95, 55, 25]);
+    let s = at(1, (x) => ((x.gold = 100000), (x.items.wolf_pelt = 9999), (x.hero.hone = 8)));
+    let hits = 0;
+    for (let i = 0; i < 200; i++) {
+      const r = hone(s);
+      if (!r.ok) throw new Error(r.why);
+      expect(r.save.hero.hone).toBe(r.hit ? 9 : 8);
+      expect(r.save.gold).toBe(s.gold - 180);
+      hits += Number(r.hit);
+      s = { ...r.save, hero: { ...r.save.hero, hone: 8 } };
+    }
+    expect(hits).toBeGreaterThan(30); // 33% chance at +8
+    expect(hits).toBeLessThan(100);
+  });
+  it("forges the weapon up one tier at a time, keeping the hone", () => {
+    const s = at(1, (x) => ((x.gold = 80), (x.items.wolf_pelt = 4), (x.hero.hone = 2)));
+    const f = ok(forgeWeapon(s));
+    expect([f.hero.weapon, f.hero.hone, f.gold, f.items.wolf_pelt]).toEqual([1, 2, 0, 0]);
+    expect(heroMax(f.hero).atk - heroMax(s.hero).atk).toBe(WEAPON_TIERS[1].bonus);
+    expect(forgeWeapon(f)).toEqual({ ok: false, why: "Gold ไม่พอ" });
+    expect(parseSave(JSON.stringify(f))?.hero.weapon).toBe(1);
   });
   it("crafts a Potion from a pelt and Gold, all or nothing", () => {
     const s = at(1, (x) => ((x.gold = 5), (x.items.wolf_pelt = 1)));

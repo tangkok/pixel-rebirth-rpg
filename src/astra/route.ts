@@ -28,7 +28,7 @@ export const ROUTE: Record<string, RouteNode> = {
   r3b: { kind: "shop", row: 3, col: 2, next: ["r4b", "r4c"] },
   r4a: { kind: "rest", row: 4, col: 0, next: ["r5a"] },
   r4b: { kind: "battle", row: 4, col: 1, enemy: "forest_wolf", next: ["r5a", "r5b"] },
-  r4c: { kind: "chest", row: 4, col: 2, loot: { potion: 2, storm_vial: 1 }, next: ["r5b"] },
+  r4c: { kind: "chest", row: 4, col: 2, loot: { potion: 2, storm_vial: 1, egg_uncommon: 1 }, next: ["r5b"] },
   r5a: { kind: "battle", row: 5, col: 0, enemy: "forest_wolf", next: ["boss"] },
   r5b: { kind: "rest", row: 5, col: 2, next: ["boss"] },
   boss: { kind: "boss", row: 6, col: 1, enemy: "ancient_guardian", loot: { pet_egg: 1 }, next: [] },
@@ -108,6 +108,7 @@ export function recordVictory(s: SaveData, id: string): SaveData {
   const n = clone(s);
   n.progress.path.push(id);
   n.hero.exp = Math.min(n.hero.exp + got.exp, 1e7);
+  n.knowledge = Math.min(n.knowledge + got.exp, 1e9); // Knowledge is earned alongside EXP (owner reference run summary)
   const was = n.hero.level;
   n.hero.level = levelFor(n.hero.exp);
   if (n.hero.level > was) heal(n); // PLACEHOLDER: a level-up fully restores HP/MP (no rule in the GDD yet)

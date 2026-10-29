@@ -3,7 +3,7 @@
 // against a snapshot and returns a new state plus an immutable event log. The screen only
 // captures one timing result per action and plays the log back, so skip, resize or a
 // double tap can never change results.
-import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_CHARGE, petBite, PETS, talentById, type ArmorId, type ClassId, type PetId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
+import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, PET_CHARGE, petBite, PET_RARITY, PETS, talentById, type ArmorId, type ClassId, type PetId, type PetRarity, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
 import { bonusOf, effectiveStats, focusOf, noTraining, type Training } from "./hero";
 
 export type Command = { type: "attack" } | { type: "skill" } | { type: "defend" } | { type: "burst" } | { type: "item"; item: ItemId };
@@ -65,7 +65,7 @@ export interface BattleState {
   /** Focus: percent added to the attack and guard timing windows. */
   focus?: number;
   /** The travelling pet: bites after each hero action, uses its ability every PET_CHARGE bites. */
-  pet?: { species: PetId; level: number; charge: number } | null;
+  pet?: { species: PetId; rarity?: PetRarity; level: number; charge: number } | null;
   diff: DifficultyId;
   hero: Fighter & { astra: number; revived: boolean };
   foe: Fighter & {
@@ -140,12 +140,12 @@ const order = (b: BattleState): Slot[] =>
   b.round === 1 ? (has(b, "time_weaver") ? ["hero", "bonus", "foe"] : ["hero", "foe"]) : heroStats(b).spd >= foeStats(b).spd ? ["hero", "foe"] : ["foe", "hero"];
 
 export function startBattle(
-  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number; train?: Training; hone?: number; armor?: ArmorId },
+  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number; train?: Training; hone?: number; armor?: ArmorId; weapon?: number },
   items: Record<ItemId, number>,
   encounterId: string,
   enemy: EnemyId,
   diff: DifficultyId = "normal",
-  pet: { species: PetId; level: number } | null = null,
+  pet: { species: PetId; rarity?: PetRarity; level: number } | null = null,
 ): BattleState {
   const max = foeStats({ enemy, diff }).maxHp;
   const b: BattleState = {
@@ -154,7 +154,7 @@ export function startBattle(
     classId: hero.classId,
     talentId: hero.talentId,
     level: hero.level ?? 1,
-    bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0, hero.armor),
+    bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0, hero.armor, hero.weapon),
     focus: focusOf(hero.train ?? noTraining()),
     pet: pet && { ...pet, charge: 0 },
     diff,
@@ -333,11 +333,12 @@ function petTurn(b: BattleState, ev: BattleEvent[]) {
     ev.push({ type: "pet", name, damage: dmg, hp: b.foe.hp, astra: b.hero.astra });
   };
   p.charge += 1;
-  if (p.charge < PET_CHARGE) return hit("กัด", petBite(p.level));
+  const bite = petBite(p.level, p.rarity);
+  if (p.charge < PET_CHARGE) return hit("กัด", bite);
   p.charge = 0;
   const name = PETS[p.species].ability;
-  if (p.species === "kitten") hit(name, petBite(p.level) * 3);
-  else if (p.species === "axolotl") heal(b, ev, name, Math.floor((heroStats(b).maxHp * 6) / 100));
+  if (p.species === "kitten") hit(name, bite * 3);
+  else if (p.species === "axolotl") heal(b, ev, name, Math.floor((heroStats(b).maxHp * 6 * PET_RARITY[p.rarity ?? "common"].power) / 10000));
   else {
     if (p.species === "pup") b.foe.weak = true;
     else b.hero.astra = clampAstra(b.hero.astra + 25);
