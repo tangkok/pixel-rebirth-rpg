@@ -124,3 +124,11 @@ describe("chests and saves", () => {
     ["negative gold", bad((s) => ({ ...s, gold: -5 }))],
   ])("rejects %s", (_, raw) => expect(parseSave(raw)).toBeNull());
 });
+
+describe("Quick Learner", () => {
+  it("adds 15% EXP, floored", async () => {
+    const { expFor } = await import("../src/astra/world");
+    expect(expFor("forest_wolf", "quick_learner")).toBe(23);
+    expect(expFor("forest_wolf", "tough_skin")).toBe(20);
+  });
+});

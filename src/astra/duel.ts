@@ -1,12 +1,41 @@
-// Side-view duel screen (BATTLE_VISUAL_DIRECTION). Commits each command through battle.ts
-// first, then plays the returned event log; skip and resize only change what is drawn.
-import { CLASSES, ENEMIES, ITEMS, type ItemId } from "./data";
-import { act, damage, foeStats, heroStats, illegal, INTENTS, physicalBase, startBattle, type BattleEvent, type BattleState, type Command } from "./battle";
+// Side-view duel screen (BATTLE_VISUAL_DIRECTION). Captures one timing result per action,
+// commits it through battle.ts, then plays the returned event log; skip and resize only
+// change what is drawn.
+import { CLASSES, ENEMIES, ITEMS, type Element, type ItemId } from "./data";
+import {
+  act,
+  damage,
+  foeStats,
+  guard,
+  heroStats,
+  illegal,
+  INTENTS,
+  judge,
+  physicalBase,
+  REACTIONS,
+  skillCost,
+  startBattle,
+  type BattleEvent,
+  type BattleState,
+  type Command,
+  type Timing,
+} from "./battle";
 import { ANIMS, FRAME_H, FRAME_W } from "./looks";
 import type { SaveData } from "./save";
-import { button, composite, crisp, h, show, still } from "./ui";
+import { button, composite, crisp, h, settings, show, still } from "./ui";
+import { expFor } from "./world";
 
 const STEP_MS = 520;
+/** The shrinking ring meets the target this long after the cue appears; input closes LATE_MS after. */
+const LEAD_MS = 700;
+const LATE_MS = 260;
+const ELEMENT: Record<Element, { thai: string; color: string }> = {
+  fire: { thai: "ไฟ", color: "#ff6a3d" },
+  water: { thai: "น้ำ", color: "#3d8bff" },
+  ice: { thai: "น้ำแข็ง", color: "#aeeeff" },
+  lightning: { thai: "สายฟ้า", color: "#ffe14d" },
+};
+const TIMING_TAG: Record<Timing, string> = { perfect: "Perfect!", good: "Good", normal: "" };
 
 export function duel(
   save: SaveData,
@@ -32,14 +61,25 @@ export function duel(
     const weapon = h("p", { class: "fe-weapon" });
     const hpNum = h("b", { class: "fe-hp-num" });
     const fill = h("i");
+    const astra = h("i");
     const el = h(
       "div",
       { class: `fe-side ${who}` },
       stats,
       weapon,
-      h("div", { class: "fe-hp" }, hpNum, h("div", { class: "fe-track", role: "meter", aria: { label: `HP ${name}` } }, fill)),
+      h(
+        "div",
+        { class: "fe-hp" },
+        hpNum,
+        h(
+          "div",
+          { class: "fe-bars" },
+          h("div", { class: "fe-track", role: "meter", aria: { label: `HP ${name}` } }, fill),
+          who === "hero" ? h("div", { class: "fe-astra", role: "meter", aria: { label: "Astra" } }, astra) : "",
+        ),
+      ),
     );
-    return { el, stats, weapon, hpNum, fill };
+    return { el, stats, weapon, hpNum, fill, astra };
   };
   const heroSide = side("hero", save.hero.name);
   const foeSide = side("foe", foe.name);
@@ -67,7 +107,13 @@ export function duel(
       h("p", { class: "area" }, h("b", {}, place), roundEl),
       intent,
       log,
-      h("p", { class: "hint" }, "Perfect Strike/Guard, Astra Burst และธาตุ มาในขั้นที่ 4 ตอนนี้ทุกการโจมตีนับเป็น Normal"),
+      h(
+        "p",
+        { class: "hint" },
+        settings.autoTiming || still()
+          ? "Auto Timing: ทุกจังหวะนับเป็น Normal (เปลี่ยนได้ใน Settings)"
+          : "แตะจอหรือกด Space ตอนวงแหวนหดตรงกัน · โจมตี Perfect ×1.2 · ป้องกัน Perfect ×0.4 · Astra เต็ม 100 ใช้ Burst",
+      ),
       cmds,
     ),
   );
@@ -127,7 +173,18 @@ export function duel(
       );
     }
     if (wolfImg.complete && wolfImg.naturalWidth)
-      sprite("foe", () => ctx.drawImage(wolfImg, (calm ? 0 : Math.floor(now / 420) % 2) * 32, 0, 32, 24, 176 - 16 + off("foe"), FOOT - 23, 32, 24));
+      sprite("foe", () => {
+        if (b.foe.frozen) ctx.filter = "hue-rotate(180deg) saturate(0.6) brightness(1.4)";
+        ctx.drawImage(wolfImg, (calm || b.foe.frozen ? 0 : Math.floor(now / 420) % 2) * 32, 0, 32, 24, 176 - 16 + off("foe"), FOOT - 23, 32, 24);
+      });
+    if (b.foe.aura && !b.over) {
+      // Applied element: a small gem over the enemy.
+      const bob = calm ? 0 : Math.round(Math.sin(now / 300));
+      ctx.fillStyle = "#240000";
+      ctx.fillRect(173, FOOT - 36 + bob, 7, 7);
+      ctx.fillStyle = ELEMENT[b.foe.aura].color;
+      ctx.fillRect(174, FOOT - 35 + bob, 5, 5);
+    }
     requestAnimationFrame(draw);
   };
 
@@ -140,7 +197,7 @@ export function duel(
   };
 
   // ---------- state → screen ----------
-  function bars(heroHp = b.hero.hp, foeHp = b.foe.hp) {
+  function bars(heroHp = b.hero.hp, foeHp = b.foe.hp, astra = b.hero.astra) {
     const hs = heroStats(b);
     const fs = foeStats(b);
     const i = INTENTS[b.intent];
@@ -151,10 +208,13 @@ export function duel(
     rows(heroSide.stats, [["DMG", heroDmg], ["SPD", hs.spd], ["MP", b.hero.mp]]);
     rows(foeSide.stats, [["DMG", b.over ? "-" : foeDmg], ["SPD", fs.spd], ["DEF", fs.def]]);
     heroSide.weapon.textContent = `${CLASSES[b.classId].weapon.name} · ${CLASSES[b.classId].weapon.thai}`;
-    foeSide.weapon.textContent = b.over ? foe.name : `${i.name} · ${i.thai}`;
+    foeSide.weapon.textContent = b.over ? foe.name : `${i.name} · ${i.thai}${b.foe.aura ? ` · ธาตุ${ELEMENT[b.foe.aura].thai}` : ""}`;
     heroSide.hpNum.textContent = String(heroHp);
     foeSide.hpNum.textContent = String(foeHp);
     heroSide.fill.style.width = `${(100 * heroHp) / hs.maxHp}%`;
+    heroSide.astra.style.width = `${astra}%`;
+    heroSide.astra.parentElement!.setAttribute("aria-valuetext", `${astra}/100`);
+    heroSide.astra.parentElement!.classList.toggle("full", astra >= 100);
     foeSide.fill.style.width = `${(100 * foeHp) / fs.maxHp}%`;
     heroSide.el.querySelector(".fe-track")!.setAttribute("aria-valuetext", `${heroHp}/${hs.maxHp}`);
     foeSide.el.querySelector(".fe-track")!.setAttribute("aria-valuetext", `${foeHp}/${fs.maxHp}`);
@@ -172,12 +232,16 @@ export function duel(
     };
     cmds.replaceChildren(
       cmd("Attack โจมตี", { type: "attack" }, { class: "primary" }),
-      cmd(`${skill.name} · MP ${skill.mp}`, { type: "skill" }),
+      cmd(`${skill.name} · MP ${skillCost(b)}`, { type: "skill" }),
       cmd("Defend ป้องกัน", { type: "defend" }),
       button(`Item ไอเทม`, items, { disabled: playing }),
     );
+    // Over the stage, so neither ever pushes the commands off a short screen.
     frame.querySelector(".skip")?.remove();
-    if (playing) frame.append(button("ข้าม ⏭", () => skipTo?.(), { class: "skip" })); // over the stage, so it never pushes the commands
+    frame.querySelector(".burst")?.remove();
+    if (playing && !cueing) frame.append(button("ข้าม ⏭", () => skipTo?.(), { class: "skip" }));
+    if (!playing && !illegal(b, { type: "burst" }))
+      frame.append(button(`✦ ${CLASSES[b.classId].burst}`, () => commit({ type: "burst" }), { class: "burst", title: "Astra Burst" }));
   }
   function items() {
     const usable = (Object.keys(ITEMS) as ItemId[]).filter((k) => b.items[k] > 0);
@@ -192,66 +256,133 @@ export function duel(
   }
   function result() {
     const win = b.over === "win";
-    log.textContent = win ? `ชนะ! ได้รับ ${foe.exp} EXP` : "พ่ายแพ้… กลับไปยังจุดเซฟล่าสุด";
+    log.textContent = win ? `ชนะ! ได้รับ ${expFor(enemy, b.talentId)} EXP` : "พ่ายแพ้… กลับไปยังจุดเซฟล่าสุด";
     cmds.replaceChildren(button(win ? "กลับสู่แผนที่" : "กลับไปจุดเซฟ", () => done(b), { class: "primary", autofocus: true }));
     cmds.querySelector("button")?.focus({ preventScroll: true });
   }
 
-  // ---------- commit, then play back ----------
-  function commit(c: Command) {
-    if (playing) return;
-    const r = act(b, `a${++seq}`, c);
-    if (!r.events.length) return; // illegal or duplicate: nothing changed
-    const before = b;
-    b = r.state;
-    play(before, r.events);
+  // ---------- timing cue → commit → play back ----------
+  let cueing = false;
+  /** One Perfect Strike/Guard result: tap or Space when the ring meets its target. */
+  function cue(kind: "strike" | "guard"): Promise<Timing> {
+    if (settings.autoTiming || still()) return Promise.resolve("normal");
+    cueing = true;
+    render();
+    const el = h(
+      "div",
+      { class: `cue ${kind}`, aria: { hidden: "true" } },
+      h("i", { class: "ring" }),
+      h("b", {}, kind === "strike" ? "โจมตี!" : "ป้องกัน!"),
+    );
+    el.style.setProperty("--lead", `${LEAD_MS}ms`);
+    frame.append(el);
+    log.textContent = kind === "strike" ? "แตะจอหรือกด Space ตอนวงแหวนตรงกัน!" : `${foe.name} กำลังจะ ${INTENTS[b.intent].name}! แตะเพื่อป้องกัน`;
+    const target = performance.now() + LEAD_MS;
+    return new Promise((resolve) => {
+      const end = (t: Timing) => {
+        clearTimeout(timer);
+        main.removeEventListener("pointerdown", tap);
+        removeEventListener("keydown", key, true);
+        document.removeEventListener("visibilitychange", away);
+        el.remove();
+        cueing = false;
+        resolve(t);
+      };
+      const tap = (e: Event) => {
+        e.preventDefault();
+        end(judge(performance.now() - target));
+      };
+      const key = (e: KeyboardEvent) => {
+        if (e.repeat || (e.key !== " " && e.key !== "Enter")) return;
+        tap(e);
+      };
+      const away = () => document.hidden && end("normal"); // backgrounding never helps
+      const timer = window.setTimeout(() => end("normal"), LEAD_MS + LATE_MS);
+      main.addEventListener("pointerdown", tap);
+      addEventListener("keydown", key, true);
+      document.addEventListener("visibilitychange", away);
+    });
   }
 
-  function play(before: BattleState, events: BattleEvent[]) {
+  async function commit(c: Command) {
+    if (playing || illegal(b, c)) return;
     playing = true;
+    const timing = c.type === "attack" || c.type === "skill" ? await cue("strike") : "normal";
+    let r = act(b, `a${++seq}`, c, timing);
+    while (r.events.length && main.isConnected) {
+      const before = b;
+      b = r.state;
+      await play(before, r.events);
+      if (b.over || b.queue[0] !== "foe") break;
+      r = guard(b, `a${++seq}`, await cue("guard"));
+    }
+    playing = false;
+    render();
+    cmds.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+  }
+
+  function play(before: BattleState, events: BattleEvent[]): Promise<void> {
     render();
     let i = 0;
     let heroHp = before.hero.hp;
     let foeHp = before.foe.hp;
+    let astra = before.hero.astra;
     let timer = 0;
-    const finish = () => {
-      clearTimeout(timer);
-      skipTo = null;
-      playing = false;
-      fx = [];
-      down = b.over === "win" ? "foe" : b.over === "lose" ? "hero" : null;
-      render();
-      cmds.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
-    };
-    skipTo = finish;
-    const step = () => {
-      if (!main.isConnected) return;
-      if (i >= events.length) return finish();
-      const e = events[i++];
-      const now = performance.now();
-      if (e.type === "hit") {
-        if (e.by === "hero") foeHp = e.hp;
-        else heroHp = e.hp;
-        fx.push({ who: e.by, kind: "strike", t0: now }, { who: e.by === "hero" ? "foe" : "hero", kind: "hurt", t0: now + 160 });
-        say(`${e.by === "hero" ? save.hero.name : foe.name} ใช้ ${e.name} · ${e.damage} ดาเมจ`, `-${e.damage}`, e.by === "hero" ? "at-foe" : "at-hero");
-      } else if (e.type === "heal") {
-        heroHp = e.hp;
-        say(`ใช้ ${e.name} ฟื้นฟู ${e.amount} HP`, `+${e.amount}`, "at-hero heal");
-      } else if (e.type === "defend") {
-        say(`${e.by === "hero" ? save.hero.name : foe.name} ตั้งท่าป้องกัน (ดาเมจที่รับ ×0.5)`, "", "");
-      } else if (e.type === "intent") {
-        const it = INTENTS[e.intent];
-        intent.textContent = `${foe.name} จะใช้: ${it.name} (${it.thai}) · พลัง +${it.power}`;
-        return step();
-      } else {
-        say(e.result === "win" ? `${foe.name} ล้มลงแล้ว!` : `${save.hero.name} หมดแรง…`, "", "");
-        down = e.result === "win" ? "foe" : "hero";
-      }
-      bars(heroHp, foeHp);
-      if (still()) return step();
-      timer = window.setTimeout(step, STEP_MS);
-    };
-    step();
+    const who = (by: "hero" | "foe") => (by === "hero" ? save.hero.name : foe.name);
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        skipTo = null;
+        fx = [];
+        down = b.over === "win" ? "foe" : b.over === "lose" ? "hero" : null;
+        bars();
+        resolve();
+      };
+      skipTo = finish;
+      const step = () => {
+        if (!main.isConnected) return resolve();
+        if (skipTo !== finish) return;
+        if (i >= events.length) return finish();
+        const e = events[i++];
+        const now = performance.now();
+        if (e.type === "hit") {
+          if (e.by === "hero") foeHp = e.hp;
+          else heroHp = e.hp;
+          astra = e.astra;
+          fx.push({ who: e.by, kind: "strike", t0: now }, { who: e.by === "hero" ? "foe" : "hero", kind: "hurt", t0: now + 160 });
+          const tag = [e.timing && TIMING_TAG[e.timing] && `${TIMING_TAG[e.timing]}${e.by === "foe" ? " Guard" : ""}`, e.reaction && REACTIONS[e.reaction]].filter(Boolean).join(" · ");
+          const freeze = e.reaction === "freeze" ? ` · ${foe.name} ถูกแช่แข็ง!` : "";
+          say(`${who(e.by)} ใช้ ${e.name}${tag ? ` · ${tag}` : ""} · ${e.damage} ดาเมจ${freeze}`, `${tag ? `${tag} ` : ""}-${e.damage}`, e.by === "hero" ? "at-foe" : "at-hero");
+        } else if (e.type === "heal") {
+          heroHp = e.hp;
+          say(`${e.name} ฟื้นฟู ${e.amount} HP`, `+${e.amount}`, "at-hero heal");
+        } else if (e.type === "mp") {
+          say(`${e.name} ฟื้นฟู ${e.amount} MP`, `+${e.amount} MP`, "at-hero heal");
+        } else if (e.type === "recoil") {
+          heroHp = e.hp;
+          say(`${e.name} กิน HP ตัวเอง ${e.damage}`, `-${e.damage}`, "at-hero");
+        } else if (e.type === "frozen") {
+          say(`${foe.name} ถูกแช่แข็ง ข้ามเทิร์นนี้!`, "Freeze", "at-foe");
+        } else if (e.type === "revive") {
+          heroHp = e.hp;
+          down = null;
+          say(`Phoenix Soul! ${save.hero.name} ฟื้นคืนชีพด้วย ${e.hp} HP`, `+${e.hp}`, "at-hero heal");
+        } else if (e.type === "defend") {
+          say(`${who(e.by)} ตั้งท่าป้องกัน (ดาเมจที่รับ ×0.5)`, "", "");
+        } else if (e.type === "intent") {
+          const it = INTENTS[e.intent];
+          intent.textContent = `${foe.name} จะใช้: ${it.name} (${it.thai}) · พลัง +${it.power}`;
+          return step();
+        } else {
+          say(e.result === "win" ? `${foe.name} ล้มลงแล้ว!` : `${save.hero.name} หมดแรง…`, "", "");
+          down = e.result === "win" ? "foe" : "hero";
+        }
+        bars(heroHp, foeHp, astra);
+        if (still()) return step();
+        timer = window.setTimeout(step, STEP_MS);
+      };
+      step();
+    });
   }
 
   function say(text: string, num: string, where: string) {

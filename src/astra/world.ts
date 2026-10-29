@@ -167,12 +167,16 @@ export function acceptQuest(s: SaveData): SaveData {
 export const levelFor = (exp: number) => LEVEL_EXP.filter((need) => exp >= need).length;
 
 /** Applies one victory. Replaying an id (reload, double callback) changes nothing. */
+/** EXP from one victory; Quick Learner adds 15% (floored). */
+export const expFor = (enemy: keyof typeof ENEMIES, talentId: string) =>
+  Math.floor((ENEMIES[enemy].exp * (talentId === "quick_learner" ? 115 : 100)) / 100);
+
 export function recordVictory(s: SaveData, encounterId: string): SaveData {
   const e = MAPS[s.progress.map].entities.find((x) => x.kind === "enemy" && x.id === encounterId);
   if (!e || e.kind !== "enemy" || s.progress.defeated.includes(encounterId)) return s;
   const n = clone(s);
   n.progress.defeated.push(encounterId);
-  n.hero.exp = Math.min(n.hero.exp + ENEMIES[e.enemy].exp, 1e7);
+  n.hero.exp = Math.min(n.hero.exp + expFor(e.enemy, n.hero.talentId), 1e7);
   n.hero.level = levelFor(n.hero.exp);
   const q = n.progress.quest;
   if (q.state === "ACTIVE" && e.enemy === "forest_wolf" && !q.kills.includes(encounterId)) {

@@ -187,6 +187,31 @@ test("touch buttons walk the hero", async ({ page }) => {
   await expect(world(page)).toHaveAttribute("data-pos", "13,9");
 });
 
+test("a well-timed tap scores Perfect/Good and fills Astra; a missed cue counts as Normal", async ({ page }) => {
+  await newHero(page);
+  await walk(page, "DRRRRRRRRR" + "R".repeat(7));
+  await page.keyboard.press("ArrowUp");
+  await expect(page.locator(".encounter")).toBeVisible();
+  // Press Space in-page exactly when the ring meets its target (700 ms after the cue appears).
+  const timed = page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        const mo = new MutationObserver(() => {
+          if (!document.querySelector(".cue.strike")) return;
+          mo.disconnect();
+          setTimeout(() => (dispatchEvent(new KeyboardEvent("keydown", { key: " " })), done()), 700);
+        });
+        mo.observe(document.body, { childList: true, subtree: true });
+      }),
+  );
+  await page.getByRole("button", { name: "Attack โจมตี" }).click();
+  await timed;
+  await expect(page.locator(".cue.guard")).toBeVisible(); // wolf's turn: guard cue, left to time out
+  await expect(page.locator(".cmds button:not(:disabled)").first()).toBeVisible({ timeout: 10_000 });
+  // Strike Perfect (+15) or Good (+10), then the faster wolf acts twice, each untimed guard Normal (+3).
+  await expect(page.locator(".fe-astra")).toHaveAttribute("aria-valuetext", /^(21|16)\/100$/);
+});
+
 test("losing a duel returns to the checkpoint at full HP and keeps the wolf", async ({ page }) => {
   await newHero(page);
   await walk(page, "DRRRRRRRRR"); // to the forest exit

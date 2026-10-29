@@ -668,6 +668,70 @@ footer.row {
   transition: width 0.3s;
 }
 .reduced .fe-track i { transition: none; }
+.fe-bars {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.fe-astra {
+  height: 4px;
+  background: #1a1030;
+  border: 1px solid #000;
+}
+.fe-astra i {
+  display: block;
+  height: 100%;
+  background: #c9a5ff;
+  transition: width 0.3s;
+}
+.fe-astra.full i { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.reduced .fe-astra i { transition: none; }
+.fe-frame .burst {
+  position: absolute;
+  left: 50%;
+  top: 2.6em;
+  translate: -50% 0;
+  padding: 0.1em 0.9em;
+  color: #240000;
+  font-weight: 700;
+  background: linear-gradient(#ffe48a, var(--gold));
+  border-color: #fff8;
+  box-shadow: 0 0 10px var(--gold);
+}
+/* Timing cue: the outer ring shrinks onto the fixed ring at the target instant. */
+.cue {
+  position: absolute;
+  top: 32%;
+  width: 3.2em;
+  height: 3.2em;
+  translate: -50% -50%;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #240000;
+  pointer-events: none;
+}
+.cue.strike { left: 74%; }
+.cue.guard { left: 26%; border-color: #8fd3ff; }
+.cue .ring {
+  position: absolute;
+  inset: -3px;
+  border: 3px solid var(--gold);
+  border-radius: 50%;
+  animation: cue var(--lead) linear forwards;
+}
+.cue b {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0.3em;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 2px 0 #240000;
+}
+@keyframes cue {
+  from { scale: 3.2; opacity: 0.3; }
+  to { scale: 1; opacity: 1; }
+}
 .fe-panel {
   grid-area: panel;
 }
