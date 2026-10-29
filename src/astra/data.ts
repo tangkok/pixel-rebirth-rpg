@@ -42,7 +42,7 @@ export interface ClassDef {
   /** First Tier 1 Active node (SKILL_NODE_SYSTEM). Unlocked by spending SP, which starts at 0. */
   skill: { name: string; mp: number; power: number; kind: "physical" | "magic"; element?: Element };
   burst: string;
-  weapon: { name: string; thai: string; art: boolean }; // art: Heroes99 has a matching layer
+  weapon: { name: string; thai: string };
 }
 
 export const CLASSES: Record<ClassId, ClassDef> = {
@@ -53,7 +53,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     base: { maxHp: 160, maxMp: 30, atk: 14, def: 16, mag: 3, res: 12, spd: 8 },
     skill: { name: "Power Slash", mp: 8, power: 16, kind: "physical" }, // PLACEHOLDER power
     burst: "Aegis Breaker",
-    weapon: { name: "Sword", thai: "ดาบ", art: true },
+    weapon: { name: "Sword", thai: "ดาบ" },
   },
   ranger: {
     name: "Ranger",
@@ -62,7 +62,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     base: { maxHp: 110, maxMp: 40, atk: 16, def: 8, mag: 5, res: 8, spd: 18 },
     skill: { name: "Power Shot", mp: 8, power: 18, kind: "physical" },
     burst: "Celestial Arrow",
-    weapon: { name: "Bow", thai: "ธนู", art: false },
+    weapon: { name: "Bow", thai: "ธนู" },
   },
   sorcerer: {
     name: "Sorcerer",
@@ -71,7 +71,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     base: { maxHp: 85, maxMp: 100, atk: 5, def: 5, mag: 20, res: 12, spd: 11 },
     skill: { name: "Firebolt", mp: 10, power: 12, kind: "magic", element: "fire" }, // PLACEHOLDER power
     burst: "Astral Nova",
-    weapon: { name: "Staff", thai: "คทา", art: true },
+    weapon: { name: "Staff", thai: "คทา" },
   },
   cleric: {
     name: "Cleric",
@@ -80,7 +80,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     base: { maxHp: 105, maxMp: 85, atk: 7, def: 9, mag: 15, res: 15, spd: 9 },
     skill: { name: "Holy Bolt", mp: 10, power: 10, kind: "magic" }, // PLACEHOLDER power
     burst: "Divine Judgment",
-    weapon: { name: "Mace", thai: "กระบอง", art: false },
+    weapon: { name: "Mace", thai: "กระบอง" },
   },
   berserk: {
     name: "Berserk",
@@ -89,7 +89,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     base: { maxHp: 180, maxMp: 20, atk: 22, def: 6, mag: 2, res: 6, spd: 10 },
     skill: { name: "Crushing Blow", mp: 10, power: 20, kind: "physical" }, // PLACEHOLDER power
     burst: "Crimson Rupture",
-    weapon: { name: "Axe", thai: "ขวาน", art: true },
+    weapon: { name: "Axe", thai: "ขวาน" },
   },
 };
 export const CLASS_IDS = Object.keys(CLASSES) as ClassId[];

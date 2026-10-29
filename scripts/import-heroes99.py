@@ -35,10 +35,12 @@ def main() -> None:
         atlas(pairs(src / "hair" / style, style, 10), out / f"hair/{style}.png")
     for n in range(1, 18):
         atlas(pairs(src / "cloth" / f"cloth{n}", f"cloth{n}", 8), out / f"cloth/cloth{n}.png")
-    for n in range(1, 5):
+    # Weapons are fixed by class: sword (1), axe (2), wand-as-staff (5, colour 1).
+    # Bow and mace are not in Heroes99; scripts/draw-weapons.py draws them.
+    for n in (1, 2):
         w = src / "weapon" / f"weapon{n}"
         atlas([w / f"weapon{n}_bot/weapon{n}_bot.png", w / f"weapon{n}_top/weapon{n}_top.png"], out / f"weapon/weapon{n}.png")
-    atlas(pairs(src / "weapon/weapon5", "weapon5", 4), out / "weapon/weapon5.png")
+    atlas(pairs(src / "weapon/weapon5", "weapon5", 1), out / "weapon/weapon5.png")
 
 
 if __name__ == "__main__":

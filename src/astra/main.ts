@@ -11,6 +11,7 @@ import {
   STAT_IDS,
   STAT_LABEL,
   talentById,
+  TALENTS,
   type ClassId,
   type Gender,
   type TalentDef,
@@ -26,8 +27,7 @@ import {
   type Settings,
 } from "./save";
 import {
-  CLASS_LOOK,
-  CLASS_WEAPON_MISSING,
+  CLASS_OUTFIT,
   defaultLook,
   FACES,
   FRAME_H,
@@ -40,8 +40,6 @@ import {
   OUTFITS,
   STRIP_W,
   SKINS,
-  WEAPON_LABEL,
-  WEAPONS,
   type Look,
 } from "./looks";
 
@@ -116,8 +114,8 @@ const loadImage = (src: string) => {
 };
 
 const sheets = new Map<string, Promise<HTMLCanvasElement>>();
-function composite(look: Look) {
-  const parts = layers(look);
+function composite(look: Look, classId: ClassId) {
+  const parts = layers(look, classId);
   const key = parts.join("|");
   let p = sheets.get(key);
   if (!p) {
@@ -135,11 +133,11 @@ function composite(look: Look) {
 
 const still = () => settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function heroSprite(look: Look, label: string) {
+function heroSprite(look: Look, classId: ClassId, label: string) {
   const canvas = h("canvas", { class: "sprite", width: FRAME_W, height: FRAME_H });
   const box = h("div", { class: "sprite-box", role: "img", aria: { label } } as never, canvas);
   const ctx = canvas.getContext("2d")!;
-  composite(look).then(
+  composite(look, classId).then(
     (sheet) => {
       let f = 0;
       const draw = () => {
@@ -172,7 +170,7 @@ addEventListener("resize", fitSprites);
 async function boot() {
   show(h("main", { class: "screen center" }, h("p", { class: "loading" }, "กำลังโหลด…")));
   try {
-    await composite(defaultLook("male", "knight"));
+    await composite(defaultLook("male", "knight"), "knight");
     title();
   } catch {
     show(
@@ -278,26 +276,26 @@ interface Draft {
   gender: Gender;
   classId: ClassId | null;
   look: Look;
-  draws: TalentDef[];
-  pick: number | null;
+  talent: TalentDef | null; // one slot: each roll replaces it
+  rolls: number;
 }
 
 const STEPS = ["ตัวตน", "อาชีพ", "รูปลักษณ์", "พรสวรรค์", "ยืนยัน"];
 
 function creation() {
-  // shortcut: draws live only in memory (GDD's "simplest MVP"); a refresh mid-creation restarts the rolls.
+  // shortcut: rolls live only in memory (GDD's "simplest MVP"); a refresh mid-creation restarts them.
   const d: Draft = {
     step: 0,
     name: "",
     gender: "male",
     classId: null,
     look: defaultLook("male", "knight"),
-    draws: [],
-    pick: null,
+    talent: null,
+    rolls: 0,
   };
   const nameCheck = () => checkName(d.name);
   const canNext = () =>
-    [nameCheck().ok, d.classId !== null, true, d.pick !== null, true][d.step];
+    [nameCheck().ok, d.classId !== null, true, d.talent !== null, true][d.step];
 
   const render = () => {
     const footerNext =
@@ -315,7 +313,7 @@ function creation() {
             h("li", { class: i === d.step ? "on" : i < d.step ? "done" : "", aria: i === d.step ? { current: "step" } : {} }, `${i + 1}. ${s}`),
           ),
         ),
-        heroSprite(d.look, "ตัวอย่างฮีโร่"),
+        heroSprite(d.look, d.classId ?? "knight", "ตัวอย่างฮีโร่"),
         h("section", { class: "panel", aria: { label: STEPS[d.step] } }, ...stepBody()),
         h(
           "footer",
@@ -349,7 +347,10 @@ function creation() {
           err.textContent = d.name && !c.ok ? c.error : "";
           root.querySelector<HTMLButtonElement>("footer .primary")!.disabled = !c.ok;
         },
-        onkeydown: (e: KeyboardEvent) => e.key === "Enter" && go(1),
+        // A handler property that returns false cancels the key, so never return the && result.
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key === "Enter") go(1);
+        },
       });
       input.setAttribute("aria-describedby", "name-err");
       return [
@@ -381,7 +382,7 @@ function creation() {
           ...CLASS_IDS.map((c) =>
             button(CLASSES[c].name, () => {
               d.classId = c;
-              d.look = { ...d.look, ...CLASS_LOOK[c] }; // class starting outfit and weapon
+              d.look = { ...d.look, ...CLASS_OUTFIT[c] }; // class starting outfit; weapon follows class
               render();
             }, {
               aria: { pressed: String(d.classId === c) },
@@ -406,7 +407,6 @@ function creation() {
           button("›", () => set(1), { aria: { label: `${label} ถัดไป` } }),
         );
       };
-      const missing = d.classId && CLASS_WEAPON_MISSING[d.classId];
       return [
         h(
           "div",
@@ -417,47 +417,53 @@ function creation() {
           cycle("สีผม", "hairColor", HAIR_COLORS),
           cycle("ชุด", "outfit", OUTFITS),
           cycle("สีชุด", "outfitColor", OUTFIT_COLORS),
-          cycle("อาวุธ", "weapon", WEAPONS, (v) => WEAPON_LABEL[v]),
         ),
-        missing && h("p", { class: "hint" }, `Heroes99 ยังไม่มี${missing} เลือกอาวุธอื่นแทนชั่วคราวได้ (ภาพ placeholder)`),
+        h("p", { class: "hint" }, `อาวุธ: ${CLASSES[d.classId!].weapon.thai} (ตามอาชีพ ${CLASSES[d.classId!].name})`),
       ];
     }
     if (d.step === 3) {
-      const left = MAX_TALENT_DRAWS - d.draws.length;
+      const left = MAX_TALENT_DRAWS - d.rolls;
+      const slot = h(
+        "div",
+        { class: "slot", aria: { live: "polite" } },
+        d.talent ? talentCard(d.talent) : h("p", { class: "hint" }, `สุ่มได้สูงสุด ${MAX_TALENT_DRAWS} ครั้ง ผลล่าสุดคือพรสวรรค์ของคุณ`),
+      );
+      const roll = button(d.rolls ? `สุ่มใหม่ (เหลือ ${left})` : "ปลุกพรสวรรค์", () => {
+        if (d.rolls >= MAX_TALENT_DRAWS || slot.classList.contains("rolling")) return;
+        d.rolls++;
+        const result = rollTalent();
+        if (still()) return ((d.talent = result), render());
+        // Spin through random talents, slowing down, then land on the real roll.
+        root.querySelectorAll<HTMLButtonElement>("button").forEach((b) => (b.disabled = true));
+        slot.classList.add("rolling");
+        let delay = 50;
+        const spin = () => {
+          if (!slot.isConnected) return;
+          if (delay > 260) return ((d.talent = result), render(), root.querySelector(".slot")?.classList.add("landed"));
+          slot.replaceChildren(talentCard(TALENTS[Math.floor(Math.random() * TALENTS.length)]));
+          delay *= 1.18;
+          setTimeout(spin, delay);
+        };
+        spin();
+      }, { class: "primary", disabled: left === 0 });
       return [
-        h(
-          "div",
-          { class: "row draw" },
-          button(d.draws.length ? `สุ่มอีกครั้ง (เหลือ ${left})` : "ปลุกพรสวรรค์", () => {
-            if (d.draws.length >= MAX_TALENT_DRAWS) return;
-            d.draws.push(rollTalent());
-            d.pick ??= 0; // first result selected; later rolls never replace it without a tap
-            render();
-          }, { class: "primary", disabled: left === 0 }),
-          h("small", { class: "odds" }, RARITY_ODDS.map((o) => `${o.thai} ${o.per1000 / 10}%`).join(" · ")),
-        ),
-        h(
-          "div",
-          { class: "talents", role: "radiogroup", aria: { label: "ผลการสุ่ม เลือกหนึ่ง" } },
-          ...(d.draws.length
-            ? d.draws.map((t, i) => talentCard(t, d.pick === i, () => ((d.pick = i), render())))
-            : [h("p", { class: "hint" }, `สุ่มได้สูงสุด ${MAX_TALENT_DRAWS} ครั้ง ผลทุกครั้งยังเลือกได้ เลือกหนึ่งพรสวรรค์`)]),
-        ),
+        h("div", { class: "row draw" }, roll, h("small", { class: "odds" }, RARITY_ODDS.map((o) => `${o.thai} ${o.per1000 / 10}%`).join(" · "))),
+        slot,
       ];
     }
-    const t = d.draws[d.pick!];
+    const t = d.talent!;
     return [
       h("h2", { class: "hero-name" }, d.name.trim()),
       h("p", { class: "meta" }, `${d.gender === "male" ? "ชาย" : "หญิง"} · ${CLASSES[d.classId!].name} · ${t.name}`),
       statGrid(effectiveStats(d.classId!, t.id), CLASSES[d.classId!].base),
-      talentCard(t, true),
+      talentCard(t),
     ];
   }
 
   function start() {
     const name = nameCheck();
-    if (!name.ok || !d.classId || d.pick === null) return;
-    const save = newSave(name.name, d.gender, d.classId, d.draws[d.pick].id, d.look);
+    if (!name.ok || !d.classId || !d.talent) return;
+    const save = newSave(name.name, d.gender, d.classId, d.talent.id, d.look);
     adventure(save, writeSave(store, save) ? "บันทึกแล้ว" : "SESSION ONLY · บันทึกไม่ได้ในเบราว์เซอร์นี้");
   }
 
@@ -471,7 +477,7 @@ function classInfo(c: ClassId) {
     { class: "class-info" },
     h("p", { class: "meta" }, `${def.thai} · ${def.identity}`),
     statGrid(def.base),
-    h("p", { class: "hint" }, `อาวุธ: ${def.weapon.name} (${def.weapon.thai})${def.weapon.art ? "" : " · ยังไม่มีภาพอาวุธ"} · Skill: ${def.skill.name} · Burst: ${def.burst}`),
+    h("p", { class: "hint" }, `อาวุธ: ${def.weapon.name} (${def.weapon.thai}) · Skill: ${def.skill.name} · Burst: ${def.burst}`),
   );
 }
 
@@ -491,7 +497,7 @@ function statGrid(s: Record<string, number>, base?: Record<string, number>) {
   );
 }
 
-function talentCard(t: TalentDef, selected: boolean, onpick?: () => void) {
+function talentCard(t: TalentDef) {
   const { plus, minus } = describeTalent(t);
   const rarity = RARITY_ODDS.find((o) => o.rarity === t.rarity)!;
   const body = [
@@ -500,9 +506,7 @@ function talentCard(t: TalentDef, selected: boolean, onpick?: () => void) {
     h("span", { class: "plus" }, plus.join(" · ")),
     h("span", { class: "minus" }, minus.join(" · ")),
   ];
-  return onpick
-    ? h("button", { type: "button", class: "talent", role: "radio", onclick: onpick, aria: { checked: String(selected) } }, ...body)
-    : h("div", { class: "talent" }, ...body);
+  return h("div", { class: `talent ${t.rarity}` }, ...body);
 }
 
 // ---------- after creation (milestone 2 starts here) ----------
@@ -515,7 +519,7 @@ function adventure(save: SaveData, notice = "") {
       "main",
       { class: "screen create" },
       h("header", { class: "area" }, h("b", {}, "Oakheart Village"), h("span", { role: "status" }, notice)),
-      heroSprite(hero.look, `${hero.name} ${CLASSES[hero.classId].name}`),
+      heroSprite(hero.look, hero.classId, `${hero.name} ${CLASSES[hero.classId].name}`),
       h(
         "section",
         { class: "panel" },

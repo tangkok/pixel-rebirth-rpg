@@ -39,7 +39,8 @@ async function expectSpriteDrawn(page: Page) {
 async function create(page: Page, name: string, check = false) {
   await page.getByRole("button", { name: "New Game" }).click();
   if (check) await expectNoScroll(page);
-  await page.locator("#hero-name").fill(name);
+  await page.locator("#hero-name").pressSequentially(name); // real key events, like typing
+  await expect(page.locator("#hero-name")).toHaveValue(name);
   await page.getByRole("button", { name: "หญิง" }).click();
   await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   await page.getByRole("button", { name: "Ranger" }).click();
@@ -47,19 +48,19 @@ async function create(page: Page, name: string, check = false) {
   await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   await page.getByRole("button", { name: "ทรงผม ถัดไป" }).click();
   await page.getByRole("button", { name: "ทรงผม ถัดไป" }).click();
-  await page.getByRole("button", { name: "อาวุธ ก่อนหน้า" }).click();
-  await expect(page.locator(".cycle output").last()).toHaveText("คทา 4");
+  await expect(page.getByRole("button", { name: /อาวุธ/ })).toHaveCount(0); // weapon follows class
   await expect(page.locator(".hint")).toContainText("ธนู");
   await expectSpriteDrawn(page);
   if (check) await expectNoScroll(page);
   await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
-  for (let i = 0; i < 3; i++) await page.locator(".draw .btn").click();
+  for (let i = 0; i < 3; i++) {
+    await page.locator(".draw .btn").click();
+    await expect(page.locator(".slot.rolling")).toHaveCount(0); // spin finished
+  }
   await expect(page.locator(".draw .btn")).toBeDisabled();
-  await expect(page.getByRole("radio")).toHaveCount(3);
+  await expect(page.locator(".slot .talent")).toHaveCount(1); // one slot, last roll kept
   if (check) await expectNoScroll(page);
-  await page.getByRole("radio").nth(1).click();
-  await expect(page.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
-  const chosen = await page.getByRole("radio").nth(1).locator("b").textContent();
+  const chosen = await page.locator(".slot .talent b").textContent();
   await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
   if (check) await expectNoScroll(page);
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
@@ -91,8 +92,36 @@ test("Continue restores the hero and chosen talent after refresh", async ({ page
   await expect(page.locator(".hero-name")).toHaveText("สวย");
   await expect(page.locator(".meta")).toContainText(`Ranger · ${talent}`);
   const look = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero.look);
-  expect(look).toMatchObject({ hair: "f3", weapon: "weapon5_c4", outfit: 11 });
+  expect(look).toEqual(expect.objectContaining({ hair: "f3", outfit: 11 }));
+  expect(look).not.toHaveProperty("weapon");
   await expectSpriteDrawn(page);
+});
+
+test("talent roll animates in one slot", async ({ page }) => {
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.locator("#hero-name").fill("Hero");
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await page.getByRole("button", { name: "Cleric" }).click();
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await expect(page.locator(".hint")).toContainText("กระบอง");
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await page.locator(".draw .btn").click();
+  await expect(page.locator(".slot.rolling")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "ถัดไป", exact: true })).toBeDisabled();
+  await expect(page.locator(".slot.landed .talent")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "ถัดไป", exact: true })).toBeEnabled();
+});
+
+test("text stays light even if the host page styles body dark", async ({ page }) => {
+  await page.addStyleTag({ content: "body { color: #000 } input { color: #000 }" });
+  await page.getByRole("button", { name: "New Game" }).click();
+  await page.locator("#hero-name").pressSequentially("ทดสอบ");
+  const fill = await page.locator("#hero-name").evaluate((el) => getComputedStyle(el).webkitTextFillColor);
+  expect(fill).toBe("rgb(238, 241, 248)");
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await page.getByRole("button", { name: "Knight" }).click();
+  const dd = await page.locator(".stats dd").first().evaluate((el) => getComputedStyle(el).color);
+  expect(dd).toBe("rgb(238, 241, 248)");
 });
 
 test("New Game asks before overwriting a save and Cancel keeps it", async ({ page }) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { CLASS_IDS, RARITY_ODDS, TALENTS } from "../src/astra/data";
+import { CLASS_IDS, CLASSES, RARITY_ODDS, TALENTS } from "../src/astra/data";
 import {
   defaultLook,
   FACES,
@@ -11,7 +11,6 @@ import {
   OUTFITS,
   parseLook,
   SKINS,
-  WEAPONS,
 } from "../src/astra/looks";
 import { checkName, describeTalent, effectiveStats, rollTalent } from "../src/astra/hero";
 import {
@@ -118,7 +117,7 @@ describe("save", () => {
     ["party array", JSON.stringify({ ...good(), hero: [good().hero] })],
     ["missing look", JSON.stringify({ ...good(), hero: { ...good().hero, look: undefined } })],
     ["male hair on female hero", JSON.stringify({ ...good(), hero: { ...good().hero, look: { ...good().hero.look, hair: "m1" } } })],
-    ["path in weapon id", JSON.stringify({ ...good(), hero: { ...good().hero, look: { ...good().hero.look, weapon: "../x" } } })],
+    ["path in hair id", JSON.stringify({ ...good(), hero: { ...good().hero, look: { ...good().hero.look, hair: "../x" } } })],
   ])("rejects %s", (_, raw) => {
     expect(parseSave(raw)).toBeNull();
   });
@@ -143,31 +142,39 @@ describe("save", () => {
 describe("Heroes99 looks", () => {
   it("every catalogued layer row exists in its atlas", () => {
     const rows = new Map<string, number>();
-    const note = (look: Parameters<typeof layers>[0]) => {
-      for (const [src, row] of layers(look)) rows.set(src, Math.max(rows.get(src) ?? 0, row));
+    const note = (look: Parameters<typeof layers>[0], c: (typeof CLASS_IDS)[number] = "knight") => {
+      for (const [src, row] of layers(look, c)) rows.set(src, Math.max(rows.get(src) ?? 0, row));
     };
     for (const g of ["male", "female"] as const)
       for (const hair of HAIR_STYLES[g])
         for (const hairColor of HAIR_COLORS) note({ ...defaultLook(g, "knight"), hair, hairColor });
     for (const outfit of OUTFITS) for (const outfitColor of OUTFIT_COLORS) note({ ...defaultLook("male", "knight"), outfit, outfitColor });
-    for (const weapon of WEAPONS) note({ ...defaultLook("male", "knight"), weapon });
+    for (const c of CLASS_IDS) note(defaultLook("male", c), c);
     for (const skin of SKINS) for (const face of FACES) note({ ...defaultLook("male", "knight"), skin, face });
-    expect(rows.size).toBe(47);
+    expect(rows.size).toBe(47); // 45 Heroes99 atlases + drawn bow and mace
     for (const [src, maxRow] of rows) {
       const png = readFileSync(`public/astra/${src}`);
       expect(png.readUInt32BE(16), src).toBe(800); // PNG IHDR width
       expect(png.readUInt32BE(20), src).toBe((maxRow + 1) * 40); // atlas has exactly the rows used
     }
   });
-  it("class defaults follow the GDD weapon contract where Heroes99 has the weapon", () => {
-    expect(defaultLook("male", "knight").weapon).toBe("weapon1"); // sword
-    expect(defaultLook("male", "berserk").weapon).toBe("weapon2"); // axe
-    expect(defaultLook("male", "sorcerer").weapon).toBe("weapon5_c1"); // wand as staff
-    expect(defaultLook("female", "ranger").weapon).toBe("none"); // no bow in Heroes99
-    expect(defaultLook("female", "cleric").weapon).toBe("none"); // no mace in Heroes99
+  it("weapon is fixed by class (Knight sword, Ranger bow, Sorcerer staff, Cleric mace, Berserk axe)", () => {
+    const weaponOf = (c: (typeof CLASS_IDS)[number]) => layers(defaultLook("male", c), c).at(-1);
+    expect(weaponOf("knight")).toEqual(["h99/weapon/weapon1.png", 1]);
+    expect(weaponOf("ranger")).toEqual(["h99/weapon/bow.png", 1]);
+    expect(weaponOf("sorcerer")).toEqual(["h99/weapon/weapon5.png", 1]);
+    expect(weaponOf("cleric")).toEqual(["h99/weapon/mace.png", 1]);
+    expect(weaponOf("berserk")).toEqual(["h99/weapon/weapon2.png", 1]);
+    expect(CLASSES.ranger.weapon.thai).toBe("ธนู");
+    expect(CLASSES.cleric.weapon.thai).toBe("กระบอง");
+  });
+  it("loads saves from before weapons were tied to class", () => {
+    const s = newSave("สวย", "female", "ranger", "hunters_mark", defaultLook("female", "ranger"));
+    const old = { ...s, hero: { ...s.hero, look: { ...s.hero.look, weapon: "weapon3" } } };
+    expect(parseSave(JSON.stringify(old))?.hero.look).toEqual(s.hero.look);
   });
   it("draws layers bottom to top per layer.gif", () => {
-    expect(layers(defaultLook("female", "knight"))).toEqual([
+    expect(layers(defaultLook("female", "knight"), "knight")).toEqual([
       ["h99/weapon/weapon1.png", 0],
       ["h99/skin.png", 0],
       ["h99/face.png", 0],
@@ -177,7 +184,6 @@ describe("Heroes99 looks", () => {
       ["h99/cloth/cloth13.png", 15],
       ["h99/weapon/weapon1.png", 1],
     ]);
-    expect(layers({ ...defaultLook("male", "sorcerer"), weapon: "weapon5_c3" })[0]).toEqual(["h99/weapon/weapon5.png", 4]);
   });
   it("rejects looks that do not match the hero's gender", () => {
     expect(parseLook(defaultLook("male", "knight"), "female")).toBeNull();

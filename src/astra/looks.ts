@@ -18,20 +18,6 @@ export const HAIR_STYLES: Record<Gender, string[]> = {
 };
 export const OUTFITS = range(17);
 export const OUTFIT_COLORS = range(8);
-/** "none" plus every Heroes99 weapon variant. Only the wand (weapon5) has colours. */
-export const WEAPONS = ["none", "weapon1", "weapon2", "weapon3", "weapon4", "weapon5_c1", "weapon5_c2", "weapon5_c3", "weapon5_c4"];
-export const WEAPON_LABEL: Record<string, string> = {
-  none: "ไม่ถือ",
-  weapon1: "ดาบ",
-  weapon2: "ขวาน",
-  weapon3: "มีดสั้น",
-  weapon4: "หอก",
-  weapon5_c1: "คทา (แดง)",
-  weapon5_c2: "คทา 2",
-  weapon5_c3: "คทา 3",
-  weapon5_c4: "คทา 4",
-};
-
 export interface Look {
   skin: number;
   face: number;
@@ -39,24 +25,28 @@ export interface Look {
   hairColor: number;
   outfit: number;
   outfitColor: number;
-  weapon: string;
 }
 
-/**
- * Class starting looks (GDD v1.7 weapons: Knight sword, Ranger bow, Sorcerer staff,
- * Cleric mace, Berserk axe). Heroes99 has no bow or mace, so Ranger and Cleric start
- * unarmed; PLACEHOLDER art until those weapons exist.
- */
-export const CLASS_LOOK: Record<ClassId, Pick<Look, "outfit" | "outfitColor" | "weapon">> = {
-  knight: { outfit: 13, outfitColor: 8, weapon: "weapon1" },
-  ranger: { outfit: 11, outfitColor: 3, weapon: "none" },
-  sorcerer: { outfit: 8, outfitColor: 4, weapon: "weapon5_c1" },
-  cleric: { outfit: 10, outfitColor: 1, weapon: "none" },
-  berserk: { outfit: 2, outfitColor: 1, weapon: "weapon2" },
+/** Class starting outfits; players can restyle them in the look step. */
+export const CLASS_OUTFIT: Record<ClassId, Pick<Look, "outfit" | "outfitColor">> = {
+  knight: { outfit: 13, outfitColor: 8 },
+  ranger: { outfit: 11, outfitColor: 3 },
+  sorcerer: { outfit: 8, outfitColor: 4 },
+  cleric: { outfit: 10, outfitColor: 1 },
+  berserk: { outfit: 2, outfitColor: 1 },
 };
-export const CLASS_WEAPON_MISSING: Partial<Record<ClassId, string>> = {
-  ranger: "ธนู",
-  cleric: "กระบอง",
+
+/**
+ * Weapon is fixed by class (GDD v1.7): Knight sword, Ranger bow, Sorcerer staff,
+ * Cleric mace, Berserk axe. Bow and mace are original layers from scripts/draw-weapons.py;
+ * the Heroes99 wand stands in for the staff.
+ */
+export const CLASS_WEAPON: Record<ClassId, string> = {
+  knight: "weapon1",
+  ranger: "bow",
+  sorcerer: "weapon5_c1",
+  cleric: "mace",
+  berserk: "weapon2",
 };
 
 export const defaultLook = (gender: Gender, classId: ClassId): Look => ({
@@ -64,31 +54,31 @@ export const defaultLook = (gender: Gender, classId: ClassId): Look => ({
   face: 1,
   hair: HAIR_STYLES[gender][0],
   hairColor: 1,
-  ...CLASS_LOOK[classId],
+  ...CLASS_OUTFIT[classId],
 });
 
 /** One layer: atlas URL and the 40px row inside it. */
 export type Layer = [src: string, row: number];
 
 /** Layers bottom to top, following Heroes99's layer.gif order. */
-export function layers(l: Look): Layer[] {
+export function layers(l: Look, classId: ClassId): Layer[] {
   // Paired atlases store each colour as a bot row then a top row.
   const pair = (src: string, color: number, top: boolean): Layer => [src, (color - 1) * 2 + (top ? 1 : 0)];
   const hair = `h99/hair/${l.hair}.png`;
   const cloth = `h99/cloth/cloth${l.outfit}.png`;
-  const [w, wc] = l.weapon.split("_c");
-  const weapon = l.weapon === "none" ? null : `h99/weapon/${w}.png`;
+  const [w, wc] = CLASS_WEAPON[classId].split("_c");
+  const weapon = `h99/weapon/${w}.png`;
   const wColor = wc ? Number(wc) : 1;
   return [
-    weapon && pair(weapon, wColor, false),
+    pair(weapon, wColor, false),
     ["h99/skin.png", l.skin - 1] as Layer,
     ["h99/face.png", l.face - 1] as Layer,
     pair(hair, l.hairColor, false),
     pair(cloth, l.outfitColor, false),
     pair(hair, l.hairColor, true),
     pair(cloth, l.outfitColor, true),
-    weapon && pair(weapon, wColor, true),
-  ].filter((x): x is Layer => !!x);
+    pair(weapon, wColor, true),
+  ];
 }
 
 const inList = <T>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
@@ -103,8 +93,7 @@ export function parseLook(v: unknown, gender: Gender): Look | null {
     !inList(HAIR_STYLES[gender], o.hair) ||
     !inList(HAIR_COLORS, o.hairColor) ||
     !inList(OUTFITS, o.outfit) ||
-    !inList(OUTFIT_COLORS, o.outfitColor) ||
-    !inList(WEAPONS, o.weapon)
+    !inList(OUTFIT_COLORS, o.outfitColor)
   )
     return null;
   return {
@@ -114,6 +103,5 @@ export function parseLook(v: unknown, gender: Gender): Look | null {
     hairColor: o.hairColor,
     outfit: o.outfit,
     outfitColor: o.outfitColor,
-    weapon: o.weapon,
   };
 }
