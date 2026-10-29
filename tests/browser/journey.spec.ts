@@ -13,7 +13,7 @@ async function expectNoScroll(page: Page) {
   const m = await page.evaluate(() => {
     const d = document.documentElement;
     const offscreen = [...document.querySelectorAll<HTMLElement>("button")]
-      .filter((el) => el.offsetParent !== null)
+      .filter((el) => el.offsetParent !== null && !el.closest(".rows")) // a town list scrolls on purpose, like the reference
       .filter((el) => {
         const r = el.getBoundingClientRect();
         return r.left < 0 || r.top < 0 || r.right > innerWidth + 0.5 || r.bottom > innerHeight + 0.5;
@@ -42,6 +42,7 @@ async function newHero(page: Page) {
   await expect(page.locator(".slot.landed")).toHaveCount(1);
   await next.click();
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await page.getByRole("button", { name: "ประตูเมือง" }).click();
   await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
   await expect(route(page)).toHaveAttribute("data-node", "start");
 }
@@ -112,8 +113,8 @@ test("a fight, a chest and a rest each apply once and survive a reload", async (
   await page.getByRole("button", { name: "Defend ป้องกัน" }).click();
   await page.getByRole("button", { name: "เริ่มเส้นทางใหม่" }).click(); // lost at 1 HP
   await expect(page.getByRole("dialog")).toContainText("การต่อสู้: 1"); // run summary
-  await page.getByRole("button", { name: "กลับไปเตรียมตัว" }).click();
-  await expect(page.getByRole("button", { name: "ออกเดินทาง!" })).toBeVisible();
+  await page.getByRole("button", { name: "กลับเมือง" }).click();
+  await expect(page.getByRole("button", { name: "ประตูเมือง" })).toBeVisible();
   await expect(route(page)).toHaveAttribute("data-node", "start");
   s = await saved(page);
   expect(s.progress.path).toEqual([]);
@@ -155,6 +156,7 @@ test("difficulty is picked before setting out and scales the enemy", async ({ pa
   await expect(page.locator(".slot.landed")).toHaveCount(1);
   await next.click();
   await page.getByRole("button", { name: "เริ่มการผจญภัย" }).click();
+  await page.getByRole("button", { name: "ประตูเมือง" }).click();
   await expect(page.locator(".diff.torment")).toBeDisabled(); // locked until 3 cleared journeys
   await page.locator(".diff.nightmare").click();
   await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
@@ -171,11 +173,32 @@ test("beating the boss ends the journey and a new one keeps the hero", async ({ 
   await winDuel(page);
   await page.getByRole("button", { name: "ดำเนินต่อ" }).click();
   await expect(page.getByRole("dialog")).toContainText("ผ่านการเดินทาง");
-  await page.getByRole("button", { name: "กลับไปเตรียมตัว" }).click();
+  await page.getByRole("button", { name: "กลับเมือง" }).click();
   await expect(route(page)).toHaveAttribute("data-node", "start");
   const s = await saved(page);
   expect(s.progress).toEqual({ path: [], wins: 1, diff: "normal" });
   expect(s.hero.level).toBe(3);
+});
+
+test("the town's hall spends level points and the smith hones and crafts", async ({ page }) => {
+  await newHero(page);
+  await patch(page, "s.hero.level = 3; s.hero.exp = 80; s.gold = 100; s.items.wolf_pelt = 3;");
+  await expect(page.getByRole("button", { name: "ลานฝึก" })).toContainText("แต้มเหลือ 2");
+  await page.getByRole("button", { name: "ลานฝึก" }).click();
+  await expectNoScroll(page);
+  await page.getByRole("button", { name: "เพิ่ม ความแข็งแกร่ง" }).dblclick(); // double tap = one point
+  await expect(page.locator(".points")).toContainText("เหลือ 1 แต้ม");
+  await page.getByRole("button", { name: "กลับเมือง" }).click();
+  await page.getByRole("button", { name: "ช่างตีเหล็ก" }).click();
+  await expectNoScroll(page);
+  await page.getByRole("button", { name: "ตีบวก +1" }).click();
+  await expect(page.locator(".building")).toContainText("Axe ขวาน +1");
+  await page.getByRole("button", { name: "หัตถกรรม" }).click();
+  await page.getByRole("button", { name: "สร้าง Potion" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  const s = await saved(page);
+  expect([s.hero.train.strength, s.hero.hone, s.gold, s.items.wolf_pelt, s.items.potion]).toEqual([1, 1, 75, 1, 4]);
 });
 
 for (const size of SIZES) {
@@ -183,6 +206,14 @@ for (const size of SIZES) {
     await page.setViewportSize(size);
     await newHero(page);
     await expectNoScroll(page);
+    await patch(page, "");
+    await expect(page.getByRole("button", { name: "ประตูเมือง" })).toBeVisible();
+    await expectNoScroll(page); // the town
+    await page.getByRole("button", { name: "ลานฝึก" }).click();
+    await expectNoScroll(page);
+    await page.getByRole("button", { name: "กลับเมือง" }).click();
+    await page.getByRole("button", { name: "ประตูเมือง" }).click();
+    await page.getByRole("button", { name: "ออกเดินทาง!" }).click();
     await page.getByRole("button", { name: "เมนู" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await expectNoScroll(page);

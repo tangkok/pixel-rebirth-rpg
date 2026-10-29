@@ -408,7 +408,7 @@ export function duel(
       };
       const tap = (e: Event) => {
         e.preventDefault();
-        end(judge(performance.now() - target, kind === "guard" ? DIFFICULTIES[b.diff].guard : 100));
+        end(judge(performance.now() - target, ((kind === "guard" ? DIFFICULTIES[b.diff].guard : 100) * (100 + (b.focus ?? 0))) / 100));
       };
       const key = (e: KeyboardEvent) => {
         if (e.repeat || (e.key !== " " && e.key !== "Enter")) return;

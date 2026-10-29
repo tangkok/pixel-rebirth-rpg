@@ -1,15 +1,17 @@
-// Journey screens: set out (start area + difficulty), pick the next event from cards, a victory
-// summary after each fight, and a run summary when the journey ends. Every game rule lives in
-// route.ts and every committed change goes through commit() so it is saved atomically.
-import { DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, ITEMS, LEVEL_EXP, STAT_IDS, STAT_LABEL, type DifficultyId, type ItemId } from "./data";
+// Journey screens: the town between journeys (gate, training hall, blacksmith), set out (start
+// area + difficulty), pick the next event from cards, a victory summary after each fight, and a
+// run summary when the journey ends. Game rules live in route.ts and town.ts, and every committed
+// change goes through commit() so it is saved atomically.
+import { CLASSES, DIFFICULTIES, DIFFICULTY_IDS, ENEMIES, HONE_MAX, HONE_PER, honeCost, ITEMS, LEVEL_EXP, RECIPES, STAT_IDS, STAT_LABEL, TRAIN, TRAIN_CAP, TRAIN_IDS, type DifficultyId, type ItemId, type StatId } from "./data";
 import { duel } from "./duel";
-import { effectiveStats } from "./hero";
+import { heroMax } from "./hero";
 import { choices, recordVictory, restartRun, rewardOf, ROUTE, ROUTE_ROWS, runSummary, startRun, visit, type NodeKind } from "./route";
 import { writeSave, type SaveData } from "./save";
+import { craft, hone, pointsLeft, resetTraining, train, type Change } from "./town";
 import { KAEL_PRICES, KAEL_TALK, merchantBuy, merchantSell, nextTradeId, TRADE_ITEMS, type Trade } from "./trade";
 import { button, fitSprites, h, heroSprite, show, store } from "./ui";
 
-const heroStatsOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId, s.hero.level);
+const heroStatsOf = (s: SaveData) => heroMax(s.hero);
 /** "MaxHP +16 · ATK +2 …" for the stats that rose between two saves. */
 const levelGains = (a: SaveData, b: SaveData) => {
   const [x, y] = [heroStatsOf(a), heroStatsOf(b)];
@@ -31,14 +33,19 @@ const EVENT: Record<NodeKind, { icon: string; title: string; type: string; text:
 const stars = (n: number, cls: string) =>
   h("span", { class: `stars ${cls}`, aria: { label: `${n}/5` } }, ...Array.from({ length: 5 }, (_, i) => h("i", { class: i < n ? "on" : "" }, "★")));
 
+type View = "town" | "setup" | "train" | "smith";
+const VIEW_LABEL: Record<View, string> = { town: "เมือง · พักก่อนออกเดินทาง", setup: "เตรียมออกเดินทาง", train: "ลานฝึก", smith: "ช่างตีเหล็ก" };
+
 type Opening = { notice?: string; win?: { before: SaveData; id: string }; ended?: SaveData };
 
 export function journey(start: SaveData, toTitle: (notice?: string) => void, open: Opening = {}) {
   let save = start;
   let busy = false; // a dialog or battle owns input
   let pickDiff: DifficultyId = save.progress.diff;
-  /** Setting out shows until the hero departs; a journey in progress opens on its route cards. */
+  /** The town shows until the hero departs; a journey in progress opens on its route cards. */
   let departed = save.progress.path.length > 0;
+  let view: View = "town";
+  let smithTab: "hone" | "craft" = "hone";
   let esc: () => void = () => void 0;
   const life = new AbortController();
 
@@ -73,10 +80,11 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     const s = heroStatsOf(save);
     status.textContent = `${save.hero.name} Lv.${save.hero.level} · HP ${save.hero.hp}/${s.maxHp} · MP ${save.hero.mp}/${s.maxMp} · ${save.gold} G`;
     const step = save.progress.path.length;
-    where.textContent = departed ? `${DIFFICULTIES[save.progress.diff].name} · ก้าวที่ ${step}/${ROUTE_ROWS}` : "เตรียมออกเดินทาง";
+    where.textContent = departed ? `${DIFFICULTIES[save.progress.diff].name} · ก้าวที่ ${step}/${ROUTE_ROWS}` : VIEW_LABEL[view];
     main.dataset.node = save.progress.path.at(-1) ?? "start";
     body.inert = busy;
-    body.replaceChildren(departed ? choose() : setup());
+    main.dataset.view = departed ? "route" : view;
+    body.replaceChildren(departed ? choose() : { town, setup, train: trainHall, smith: smithy }[view]());
     fitSprites();
   }
   let toastTimer = 0;
@@ -127,7 +135,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
       h(
         "div",
         { class: "row setup-foot" },
-        button("กลับ", () => (leave(), toTitle())),
+        button("กลับ", () => go("town")),
         h("span", { class: "meta" }, `${DIFFICULTIES[pickDiff].name} · ${AREAS[0]}`),
         button("ออกเดินทาง!", depart, { class: "primary" }),
       ),
@@ -138,6 +146,144 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     if (!next) return toast("ยังเลือกความยากนี้ไม่ได้");
     departed = true;
     commit(next, `ออกเดินทาง · ${DIFFICULTIES[pickDiff].name}`);
+  }
+
+  // ---------- town: tap a building ----------
+  function go(v: View) {
+    view = v;
+    draw();
+    body.querySelector<HTMLElement>(".btn:not(:disabled)")?.focus({ preventScroll: true });
+  }
+  function town() {
+    const left = pointsLeft(save);
+    const spot = (img: string, name: string, sub: string, v: View) => {
+      const b = button("", () => go(v), { class: `bldg ${img}`, aria: { label: name } });
+      b.append(h("img", { src: `town/${img}.png`, alt: "" }), h("span", { class: "plaque" }, h("b", {}, name), h("small", {}, sub)));
+      return b;
+    };
+    const el = h(
+      "section",
+      { class: "town" },
+      h(
+        "div",
+        { class: "street" },
+        spot("hall", "ลานฝึก", left ? `แต้มเหลือ ${left}` : "ฝึกค่าสถานะ", "train"),
+        spot("gate", "ประตูเมือง", "ออกเดินทาง", "setup"),
+        spot("smithy", "ช่างตีเหล็ก", `${CLASSES[save.hero.classId].weapon.thai} +${save.hero.hone}`, "smith"),
+      ),
+    );
+    el.style.backgroundImage = 'url("town/backdrop.png")';
+    return el;
+  }
+  /** Applies a town change, or says why it was refused. */
+  function act(what: string, r: Change, msg: string) {
+    if (doubled(what)) return;
+    if (!r.ok) return toast(r.why);
+    commit(r.save, msg);
+  }
+  /** Shared frame of the hall and the smithy: art and blurb on the side, tabs and rows beside. */
+  function building(title: string, art: Node, blurb: string, ...content: Node[]) {
+    return h(
+      "section",
+      { class: "building" },
+      h("header", { class: "row" }, h("h2", {}, title), button("✕", () => go("town"), { class: "close", aria: { label: "กลับเมือง" } })),
+      h("aside", {}, art, h("p", {}, blurb)),
+      h("div", { class: "rows" }, ...content),
+    );
+  }
+  function trainHall() {
+    const left = pointsLeft(save);
+    const rows = TRAIN_IDS.map((id) => {
+      const t = TRAIN[id];
+      const n = save.hero.train[id];
+      const gain = (k: number) =>
+        id === "focus" ? `หน้าต่างจังหวะ +${k * TRAIN.focus.window}%` : (Object.entries(t.stats) as [StatId, number][]).map(([st, per]) => `${STAT_LABEL[st]} +${per * k}`).join(" · ");
+      return h(
+        "div",
+        { class: "trow" },
+        h(
+          "div",
+          {},
+          h("b", {}, t.name),
+          h("small", {}, t.text),
+          h("span", { class: "meter" }, h("progress", { max: TRAIN_CAP, value: n }), `${n} / ${TRAIN_CAP}`),
+          h("small", { class: n ? "gain" : "" }, n ? gain(n) : "ยังไม่มีแต้ม"),
+          h("small", { class: "next" }, n >= TRAIN_CAP ? "ถึงขีดสูงสุดแล้ว" : `แต้มถัดไป: ${gain(1)}`),
+        ),
+        button("+", () => act(`train:${id}`, train(save, id), `${t.name} ${n + 1}/${TRAIN_CAP}`), {
+          class: "plus",
+          disabled: left < 1 || n >= TRAIN_CAP,
+          aria: { label: `เพิ่ม ${t.name}` },
+        }),
+      );
+    });
+    const spent = save.hero.level - 1 - left;
+    return building(
+      "ลานฝึก",
+      heroSprite(save.hero.look, save.hero.classId, save.hero.name),
+      `${save.hero.name} · ${CLASSES[save.hero.classId].thai} Lv.${save.hero.level} ได้ 1 แต้มทุกครั้งที่เลเวลอัป ใช้แต้มเพื่อเพิ่มค่าสถานะ`,
+      h(
+        "div",
+        { class: "points row" },
+        h("b", {}, left ? `เหลือ ${left} แต้ม` : "ไม่มีแต้มเหลือ"),
+        button("คืนแต้มทั้งหมด", () => act("reset", resetTraining(save), "คืนแต้มแล้ว"), { disabled: !spent }),
+      ),
+      ...rows,
+    );
+  }
+  function smithy() {
+    const weapon = CLASSES[save.hero.classId].weapon;
+    const tabs = h(
+      "div",
+      { class: "tabs row", role: "group" },
+      ...(["hone", "craft"] as const).map((t) =>
+        button(t === "hone" ? "ตีบวก" : "หัตถกรรม", () => ((smithTab = t), draw()), { class: smithTab === t ? "on" : "", aria: { pressed: String(smithTab === t) } }),
+      ),
+    );
+    const have = `มี ${save.gold} Gold · Wolf Pelt ×${save.items.wolf_pelt}`;
+    let content: Node[];
+    if (smithTab === "hone") {
+      const lv = save.hero.hone;
+      const c = honeCost(lv);
+      const maxed = lv >= HONE_MAX;
+      content = [
+        h(
+          "div",
+          { class: "trow" },
+          h(
+            "div",
+            {},
+            h("b", {}, `${weapon.name} ${weapon.thai} +${lv}`),
+            h("small", { class: "gain" }, `ATK และ MAG +${lv * HONE_PER}`),
+            h("span", { class: "meter" }, h("progress", { max: HONE_MAX, value: lv }), `+${lv} / +${HONE_MAX}`),
+            h("small", { class: "next" }, maxed ? "ตีบวกสูงสุดแล้ว" : `ตีบวก +${lv + 1}: ใช้ ${c.gold} Gold · Wolf Pelt ×${c.wolf_pelt}`),
+          ),
+          button(maxed ? "สูงสุด" : `ตีบวก +${lv + 1}`, () => act("hone", hone(save), `${weapon.name} +${lv + 1}!`), {
+            class: "primary",
+            disabled: maxed || save.gold < c.gold || save.items.wolf_pelt < c.wolf_pelt,
+          }),
+        ),
+      ];
+    } else
+      content = (Object.entries(RECIPES) as [ItemId, { wolf_pelt: number; gold: number }][]).map(([it, r]) =>
+        h(
+          "div",
+          { class: "trow" },
+          h("div", {}, h("b", {}, ITEMS[it].name), h("small", {}, `ใช้ ${r.gold} Gold · Wolf Pelt ×${r.wolf_pelt}`), h("small", { class: "next" }, `มีอยู่ ${save.items[it]}`)),
+          button("สร้าง", () => act(`craft:${it}`, craft(save, it), `สร้าง ${ITEMS[it].name} ×1`), {
+            disabled: save.gold < r.gold || save.items.wolf_pelt < r.wolf_pelt,
+            aria: { label: `สร้าง ${ITEMS[it].name}` },
+          }),
+        ),
+      );
+    return building(
+      "ช่างตีเหล็ก",
+      h("img", { src: "town/smithy.png", alt: "" }),
+      "เตาหลอมยังร้อนอยู่เสมอ เอา Wolf Pelt กับ Gold มา แล้วจะตีอาวุธให้คมขึ้น หรือทำไอเทมไว้ใช้ในการต่อสู้",
+      tabs,
+      h("p", { class: "meta" }, have),
+      ...content,
+    );
   }
 
   // ---------- route: pick one of the next events ----------
@@ -169,10 +315,16 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     return h("section", { class: "choose" }, bar, h("div", { class: "events" }, ...cards));
   }
 
-  let pickedAt = -Infinity;
+  let tap = { at: -Infinity, what: "" };
+  /** True for the second tap of a double tap on `what`, which must not also press what was redrawn under it. */
+  const doubled = (what: string) => {
+    const now = performance.now();
+    if (now - tap.at < 400 && tap.what === what) return true;
+    tap = { at: now, what };
+    return false;
+  };
   function pick(id: string) {
-    if (busy || !choices(save).includes(id) || performance.now() - pickedAt < 400) return; // a double tap must not also pick the card drawn under it
-    pickedAt = performance.now();
+    if (busy || !choices(save).includes(id) || doubled("pick")) return;
     const n = ROUTE[id];
     if (n.enemy) return fight(id);
     const next = visit(save, id)!;
@@ -190,6 +342,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     const r = rewardOf(before, id);
     const lines = [`+${r.gold} Gold`, `+${r.exp} EXP`, ...(r.item ? [`${ITEMS[r.item].name} ×1`] : [])];
     if (save.hero.level > before.hero.level) lines.push(`เลเวลอัป! Lv.${save.hero.level} (${levelGains(before, save)})`);
+    if (save.hero.level > before.hero.level) lines.push(`แต้มฝึก +${save.hero.level - before.hero.level} · ใช้ได้ที่ลานฝึกในเมือง`);
     talk("ชัยชนะ!", "", [["ดำเนินต่อ", () => (save.progress.path.at(-1) === "boss" ? ended(save) : close())]], lines);
   }
   /** End of a journey (boss beaten or a lost fight): what it earned, then back to setting out. */
@@ -197,9 +350,10 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     const r = runSummary(run);
     const found = Object.entries(r.found).map(([k, q]) => `${ITEMS[k as ItemId].name} ×${q}`);
     talk(r.cleared ? "ผ่านการเดินทาง!" : "กลับสู่จุดเริ่ม", r.cleared ? `${run.hero.name} ปราบผู้พิทักษ์โบราณได้แล้ว` : `${run.hero.name} ถอยกลับมาตั้งหลัก`, [
-      ["กลับไปเตรียมตัว", () => {
+      ["กลับเมือง", () => {
         if (save.progress.path.length) commit(restartRun(save), "เริ่มการเดินทางใหม่");
         departed = false;
+        view = "town";
         close();
       }],
     ], [
@@ -281,7 +435,7 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
     panel.hidden = true;
     busy = false;
     draw();
-    body.querySelector<HTMLElement>(".event, .diff.on")?.focus({ preventScroll: true });
+    body.querySelector<HTMLElement>(".event, .diff.on, .bldg")?.focus({ preventScroll: true });
   }
 
   function menu() {
@@ -331,5 +485,5 @@ export function journey(start: SaveData, toTitle: (notice?: string) => void, ope
   if (open.notice) toast(open.notice);
   if (open.win) victory(open.win.before, open.win.id);
   else if (open.ended) ended(open.ended);
-  else body.querySelector<HTMLElement>(".event, .diff.on")?.focus({ preventScroll: true });
+  else body.querySelector<HTMLElement>(".event, .diff.on, .bldg")?.focus({ preventScroll: true });
 }

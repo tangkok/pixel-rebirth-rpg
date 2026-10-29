@@ -1,6 +1,10 @@
 import {
   CLASSES,
   GROWTH,
+  HONE_PER,
+  TRAIN,
+  TRAIN_IDS,
+  type TrainId,
   RARITY_ODDS,
   STAT_IDS,
   STAT_LABEL,
@@ -54,15 +58,15 @@ export function rollTalent(rng: () => number = Math.random): TalentDef {
   return tier[Math.min(tier.length - 1, Math.floor(rng() * tier.length))];
 }
 
-/** COMBAT_SPEC §1: effective = max(1, floor(base * (1 + sum(percentMods)))); base grows per level. */
-export function effectiveStats(classId: ClassId, talentId?: string, level = 1): Stats {
+/** COMBAT_SPEC §1: effective = max(1, floor(base * (1 + sum(percentMods)))); base grows per level and takes flat town bonuses. */
+export function effectiveStats(classId: ClassId, talentId?: string, level = 1, extra: Partial<Stats> = {}): Stats {
   const base = CLASSES[classId].base;
   const grow = GROWTH[classId];
   const mods = talentId ? (talentById(talentId)?.stats ?? {}) : {};
   const out = {} as Stats;
   for (const s of STAT_IDS) {
     // Integer percent math avoids 18 * 1.08 float drift.
-    out[s] = Math.max(1, Math.floor(((base[s] + grow[s] * (level - 1)) * (100 + (mods[s] ?? 0))) / 100));
+    out[s] = Math.max(1, Math.floor(((base[s] + grow[s] * (level - 1) + (extra[s] ?? 0)) * (100 + (mods[s] ?? 0))) / 100));
   }
   return out;
 }
@@ -82,3 +86,19 @@ export function describeTalent(t: TalentDef): { plus: string[]; minus: string[] 
   if (t.minus) minus.push(t.minus);
   return { plus, minus };
 }
+
+export type Training = Record<TrainId, number>;
+export const noTraining = (): Training => Object.fromEntries(TRAIN_IDS.map((t) => [t, 0])) as Training;
+
+/** Flat stat bonus from training points and the honed weapon, added to base before the talent percents. */
+export function bonusOf(train: Training, hone: number): Partial<Stats> {
+  const out: Partial<Stats> = { atk: hone * HONE_PER, mag: hone * HONE_PER };
+  for (const t of TRAIN_IDS)
+    for (const [s, per] of Object.entries(TRAIN[t].stats) as [keyof Stats, number][]) out[s] = (out[s] ?? 0) + per * train[t];
+  return out;
+}
+/** Timing window percent bonus from Focus. */
+export const focusOf = (train: Training) => train.focus * TRAIN.focus.window;
+/** A hero's stats with level, talent, training and hone all applied. */
+export const heroMax = (h: { classId: ClassId; talentId: string; level: number; train: Training; hone: number }) =>
+  effectiveStats(h.classId, h.talentId, h.level, bonusOf(h.train, h.hone));

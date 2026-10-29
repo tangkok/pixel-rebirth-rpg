@@ -199,6 +199,38 @@ export const DIFFICULTIES = {
 export type DifficultyId = keyof typeof DIFFICULTIES;
 export const DIFFICULTY_IDS = Object.keys(DIFFICULTIES) as DifficultyId[];
 
-/** PLACEHOLDER: total EXP needed to reach each level (GDD: levels 1–3). */
-export const LEVEL_EXP = [0, 30, 80];
+/**
+ * PLACEHOLDER: total EXP needed to reach each level. The GDD lists levels 1–3 (0, 30, 80); the owner's
+ * town reference has stat points per level, so the same curve, 10 × (L² − 1), continues to level 20.
+ */
+export const LEVEL_EXP = Array.from({ length: 20 }, (_, i) => 10 * ((i + 1) ** 2 - 1));
 export const MAX_LEVEL = LEVEL_EXP.length;
+
+/**
+ * PLACEHOLDER training hall (owner reference): one point per level above 1, each point a flat
+ * bonus on its stats (Focus: a percent on the timing windows), at most TRAIN_CAP points per line.
+ * Flat, not percent: early stats are small enough that a few percent would round away.
+ */
+export const TRAIN = {
+  strength: { name: "ความแข็งแกร่ง", text: "ATK สูงขึ้น การโจมตีกายภาพแรงขึ้น", stats: { atk: 1 } },
+  arcane: { name: "ความลึกลับ", text: "MAG และ MaxMP สูงขึ้น เวทแรงขึ้น", stats: { mag: 1, maxMp: 3 } },
+  agility: { name: "ความคล่องแคล่ว", text: "SPD สูงขึ้น ได้ลงมือก่อนบ่อยขึ้น", stats: { spd: 1 } },
+  vitality: { name: "พลังชีวิต", text: "MaxHP สูงขึ้น", stats: { maxHp: 8 } },
+  guard: { name: "การป้องกัน", text: "DEF และ RES สูงขึ้น รับดาเมจน้อยลง", stats: { def: 1, res: 1 } },
+  focus: { name: "โฟกัส", text: "หน้าต่างจังหวะโจมตีและป้องกันกว้างขึ้น", stats: {}, window: 3 },
+} satisfies Record<string, { name: string; text: string; stats: Partial<Stats>; window?: number }>;
+export type TrainId = keyof typeof TRAIN;
+export const TRAIN_IDS = Object.keys(TRAIN) as TrainId[];
+export const TRAIN_CAP = 10;
+
+/** PLACEHOLDER blacksmith: honing the class weapon to +HONE_MAX, each level ATK and MAG +2 (flat). */
+export const HONE_MAX = 10;
+export const HONE_PER = 2;
+export const honeCost = (level: number) => ({ gold: 20 * (level + 1), wolf_pelt: level + 1 });
+/** PLACEHOLDER blacksmith crafts: Wolf Pelt and Gold into battle items. */
+export const RECIPES: Partial<Record<ItemId, { wolf_pelt: number; gold: number }>> = {
+  potion: { wolf_pelt: 1, gold: 5 },
+  water_flask: { wolf_pelt: 2, gold: 15 },
+  frost_shard: { wolf_pelt: 2, gold: 15 },
+  storm_vial: { wolf_pelt: 2, gold: 15 },
+};

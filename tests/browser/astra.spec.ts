@@ -97,7 +97,7 @@ test("Continue restores the hero and chosen talent after refresh", async ({ page
   const look = await page.evaluate(() => JSON.parse(localStorage.getItem("echoes-of-astra-save")!).hero.look);
   expect(look).toEqual(expect.objectContaining({ hair: "f3", outfit: 11 }));
   expect(look).not.toHaveProperty("weapon");
-  await expect(page.getByRole("button", { name: "ออกเดินทาง!" })).toBeVisible(); // a new hero sets out first
+  await expect(page.getByRole("button", { name: "ประตูเมือง" })).toBeVisible(); // a new hero starts in town
 });
 
 test("talent roll animates in one slot", async ({ page }) => {

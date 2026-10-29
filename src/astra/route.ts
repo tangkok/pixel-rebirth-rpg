@@ -2,7 +2,7 @@
 // time, in the style of a route-choice RPG. Pure functions over SaveData so a replayed choice
 // or victory never pays twice; journey.ts only draws and forwards taps.
 import { DIFFICULTIES, ENEMIES, ITEMS, LEVEL_EXP, type DifficultyId, type EnemyId, type ItemId } from "./data";
-import { effectiveStats } from "./hero";
+import { heroMax } from "./hero";
 import type { SaveData } from "./save";
 
 export type NodeKind = "battle" | "chest" | "rest" | "shop" | "boss";
@@ -58,7 +58,7 @@ export const expFor = (enemy: keyof typeof ENEMIES, talentId: string) =>
   Math.floor((ENEMIES[enemy].exp * (talentId === "quick_learner" ? 115 : 100)) / 100);
 
 const clone = (s: SaveData): SaveData => JSON.parse(JSON.stringify(s));
-const maxOf = (s: SaveData) => effectiveStats(s.hero.classId, s.hero.talentId, s.hero.level);
+const maxOf = (s: SaveData) => heroMax(s.hero);
 const heal = (n: SaveData) => {
   const max = maxOf(n);
   n.hero.hp = max.maxHp;

@@ -4,7 +4,7 @@
 // captures one timing result per action and plays the log back, so skip, resize or a
 // double tap can never change results.
 import { CLASSES, DIFFICULTIES, ENEMIES, ITEMS, talentById, type ClassId, type DifficultyId, type Element, type EnemyId, type ItemId, type Stats } from "./data";
-import { effectiveStats } from "./hero";
+import { bonusOf, effectiveStats, focusOf, noTraining, type Training } from "./hero";
 
 export type Command = { type: "attack" } | { type: "skill" } | { type: "defend" } | { type: "burst" } | { type: "item"; item: ItemId };
 export type IntentId = "bite" | "heavy_bite" | "ferocious_bite";
@@ -60,6 +60,10 @@ export interface BattleState {
   classId: ClassId;
   talentId: string;
   level: number;
+  /** Flat stat bonus from training and the honed weapon (hero.ts bonusOf). */
+  bonus?: Partial<Stats>;
+  /** Focus: percent added to the attack and guard timing windows. */
+  focus?: number;
   diff: DifficultyId;
   hero: Fighter & { astra: number; revived: boolean };
   foe: Fighter & {
@@ -105,7 +109,7 @@ export type BattleEvent =
   | { type: "intent"; intent: IntentId }
   | { type: "end"; result: "win" | "lose" };
 
-export const heroStats = (b: Pick<BattleState, "classId" | "talentId" | "level">): Stats => effectiveStats(b.classId, b.talentId, b.level);
+export const heroStats = (b: Pick<BattleState, "classId" | "talentId" | "level" | "bonus">): Stats => effectiveStats(b.classId, b.talentId, b.level, b.bonus);
 export const foeStats = (b: Pick<BattleState, "enemy" | "diff">): Stats => {
   const d = DIFFICULTIES[b.diff];
   const s = ENEMIES[b.enemy].stats;
@@ -133,7 +137,7 @@ const order = (b: BattleState): Slot[] =>
   b.round === 1 ? (has(b, "time_weaver") ? ["hero", "bonus", "foe"] : ["hero", "foe"]) : heroStats(b).spd >= foeStats(b).spd ? ["hero", "foe"] : ["foe", "hero"];
 
 export function startBattle(
-  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number },
+  hero: { classId: ClassId; talentId: string; level?: number; hp: number; mp: number; train?: Training; hone?: number },
   items: Record<ItemId, number>,
   encounterId: string,
   enemy: EnemyId,
@@ -146,6 +150,8 @@ export function startBattle(
     classId: hero.classId,
     talentId: hero.talentId,
     level: hero.level ?? 1,
+    bonus: bonusOf(hero.train ?? noTraining(), hero.hone ?? 0),
+    focus: focusOf(hero.train ?? noTraining()),
     diff,
     hero: { hp: hero.hp, mp: hero.mp, defending: false, astra: 0, revived: false },
     foe: { hp: max, mp: 0, defending: false, actions: 0, aura: null, auraAge: 0, shock: 0, weak: false, frozen: false, freezeImmune: 0 },

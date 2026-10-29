@@ -3,15 +3,18 @@ import {
   DIFFICULTY_IDS,
   type DifficultyId,
   GENDERS,
+  HONE_MAX,
   ITEMS,
   MAX_LEVEL,
   STARTING_ITEMS,
+  TRAIN_CAP,
+  TRAIN_IDS,
   talentById,
   type ClassId,
   type Gender,
   type ItemId,
 } from "./data";
-import { checkName, effectiveStats } from "./hero";
+import { checkName, heroMax, noTraining, type Training } from "./hero";
 import { parseLook, type Look } from "./looks";
 import { validPath } from "./route";
 import { KAEL_STOCK } from "./trade";
@@ -33,6 +36,10 @@ export interface SaveData {
     exp: number;
     hp: number;
     mp: number;
+    /** Training hall points spent per line; their total never exceeds level − 1. */
+    train: Training;
+    /** Blacksmith hone level of the class weapon, 0 to HONE_MAX. */
+    hone: number;
   };
   items: Record<ItemId, number>;
   gold: number;
@@ -62,10 +69,11 @@ export function newSave(
   talentId: string,
   look: Look,
 ): SaveData {
-  const s = effectiveStats(classId, talentId);
+  const train = noTraining();
+  const s = heroMax({ classId, talentId, level: 1, train, hone: 0 });
   return {
     version: SAVE_VERSION,
-    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp },
+    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0 },
     items: { ...STARTING_ITEMS },
     gold: 0,
     progress: freshProgress(),
@@ -109,7 +117,19 @@ export function parseSave(raw: string | null): SaveData | null {
   const look = parseLook(h.look, h.gender as Gender);
   if (!look) return null;
   if (!isInt(h.level, 1, MAX_LEVEL) || !isInt(h.exp, 0, 1e7)) return null;
-  const max = effectiveStats(h.classId as ClassId, h.talentId, h.level);
+  // Saves from before the town have no training or hone yet.
+  const rawTrain = h.train ?? {};
+  if (!isObj(rawTrain) || Object.keys(rawTrain).some((k) => !TRAIN_IDS.includes(k as never))) return null;
+  const train = noTraining();
+  for (const t of TRAIN_IDS) {
+    const n = rawTrain[t] ?? 0;
+    if (!isInt(n, 0, TRAIN_CAP)) return null;
+    train[t] = n;
+  }
+  if (Object.values(train).reduce((a, n) => a + n, 0) > h.level - 1) return null;
+  const hone = h.hone ?? 0;
+  if (!isInt(hone, 0, HONE_MAX)) return null;
+  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone });
   if (!isInt(h.hp, 0, max.maxHp) || !isInt(h.mp, 0, max.maxMp)) return null;
 
   const itemIds = Object.keys(ITEMS) as ItemId[];
@@ -150,6 +170,8 @@ export function parseSave(raw: string | null): SaveData | null {
       exp: h.exp,
       hp: h.hp,
       mp: h.mp,
+      train,
+      hone,
     },
     items: bag,
     gold: d.gold,
