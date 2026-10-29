@@ -1,0 +1,311 @@
+import {
+  CLASS_IDS,
+  DIFFICULTY_IDS,
+  type DifficultyId,
+  GENDERS,
+  HONE_MAX,
+  WEAPON_TIERS,
+  ITEMS,
+  ARMOR_IDS,
+  type ArmorId,
+  MAX_LEVEL,
+  STARTER_ARMOR,
+  FARM_TIERS,
+  PET_IDS,
+  PET_RARITIES,
+  type PetId,
+  type PetRarity,
+  STARTING_ITEMS,
+  TRAIN_CAP,
+  TRAIN_IDS,
+  talentById,
+  type ClassId,
+  type Gender,
+  type ItemId,
+} from "./data";
+import { checkName, heroMax, noTraining, type Training } from "./hero";
+import { parseLook, type Look } from "./looks";
+import { validPath } from "./route";
+import { KAEL_STOCK } from "./trade";
+
+export const SAVE_KEY = "echoes-of-astra-save";
+export const BACKUP_KEY = "echoes-of-astra-save-backup";
+export const SETTINGS_KEY = "echoes-of-astra-settings";
+export const SAVE_VERSION = 5;
+
+export interface SaveData {
+  version: 5;
+  hero: {
+    name: string;
+    gender: Gender;
+    classId: ClassId;
+    talentId: string;
+    look: Look;
+    level: number;
+    exp: number;
+    hp: number;
+    mp: number;
+    /** Training hall points spent per line; their total never exceeds level − 1. */
+    train: Training;
+    /** Blacksmith hone level of the class weapon, 0 to HONE_MAX. */
+    hone: number;
+    /** Forged tier of the class weapon, an index into WEAPON_TIERS. */
+    weapon: number;
+    /** Armour worn, and every set owned (forged at the blacksmith; the tunic is the start). */
+    armor: ArmorId;
+    armors: ArmorId[];
+  };
+  items: Record<ItemId, number>;
+  gold: number;
+  progress: {
+    /** Route nodes taken this journey, start to current; a node is never applied twice. */
+    path: string[];
+    /** Bosses beaten (completed journeys). */
+    wins: number;
+    /** Difficulty of the current journey, chosen before its first step. */
+    diff: DifficultyId;
+  };
+  /** Knowledge (owner reference currency): earned with EXP from every won fight, spent on farm upgrades. */
+  knowledge: number;
+  /** Farm: hatched pets (`seq` numbers them, so ids never repeat), the one travelling along, and the farm tier (FARM_TIERS index). */
+  pets: { seq: number; list: Pet[]; with: number | null; farm: number };
+  /** Merchant trades: `seq` counts confirmed trades (the receipt), `kael` is his stock left. */
+  trade: { seq: number; kael: Partial<Record<ItemId, number>> };
+  savedAt: number;
+}
+
+export interface Pet {
+  id: number;
+  species: PetId;
+  rarity: PetRarity;
+  xp: number;
+  /** Player-given name; the species name shows when empty. */
+  name: string;
+  /** A locked pet cannot be released or fused away. */
+  locked: boolean;
+}
+
+export interface Settings {
+  autoTiming: boolean;
+  reducedMotion: boolean;
+}
+export const DEFAULT_SETTINGS: Settings = { autoTiming: false, reducedMotion: false };
+
+export function newSave(
+  name: string,
+  gender: Gender,
+  classId: ClassId,
+  talentId: string,
+  look: Look,
+): SaveData {
+  const train = noTraining();
+  const s = heroMax({ classId, talentId, level: 1, train, hone: 0, armor: STARTER_ARMOR });
+  return {
+    version: SAVE_VERSION,
+    hero: { name, gender, classId, talentId, look, level: 1, exp: 0, hp: s.maxHp, mp: s.maxMp, train, hone: 0, weapon: 0, armor: STARTER_ARMOR, armors: [STARTER_ARMOR] },
+    items: { ...STARTING_ITEMS },
+    gold: 0,
+    knowledge: 0,
+    progress: freshProgress(),
+    pets: freshPets(),
+    trade: freshTrade(),
+    savedAt: Date.now(),
+  };
+}
+
+const freshPets = (): SaveData["pets"] => ({ seq: 0, list: [], with: null, farm: 0 });
+const freshProgress = (): SaveData["progress"] => ({ path: [], wins: 0, diff: "normal" });
+const freshTrade = (): SaveData["trade"] => ({ seq: 0, kael: { ...KAEL_STOCK } });
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+const isInt = (v: unknown, min: number, max: number): v is number =>
+  Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
+
+/** Validates untrusted save JSON. Returns null on anything unexpected. */
+export function parseSave(raw: string | null): SaveData | null {
+  if (!raw) return null;
+  let d: unknown;
+  try {
+    d = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isObj(d)) return null;
+  if (d.version === 1) d = migrateV1(d);
+  if (isObj(d) && d.version === 2) d = { ...d, version: 3, trade: freshTrade() };
+  if (isObj(d) && d.version === 4) d = dropShop(d);
+  // v3 walked Oakheart and the forest; the owner replaced both with a route. Keep the hero, bag and Gold.
+  if (isObj(d) && d.version === 3) d = { ...d, version: 5, progress: freshProgress() };
+  if (!isObj(d) || d.version !== SAVE_VERSION) return null;
+  const { hero: h, items, progress: p } = d;
+  if (!isObj(h) || !isObj(items) || !isObj(p)) return null;
+
+  const name = checkName(h.name);
+  if (!name.ok || name.name !== h.name) return null;
+  if (!GENDERS.includes(h.gender as Gender)) return null;
+  if (!CLASS_IDS.includes(h.classId as ClassId)) return null;
+  if (typeof h.talentId !== "string" || !talentById(h.talentId)) return null;
+  const look = parseLook(h.look, h.gender as Gender);
+  if (!look) return null;
+  if (!isInt(h.level, 1, MAX_LEVEL) || !isInt(h.exp, 0, 1e7)) return null;
+  // Saves from before the town have no training or hone yet.
+  const rawTrain = h.train ?? {};
+  if (!isObj(rawTrain) || Object.keys(rawTrain).some((k) => !TRAIN_IDS.includes(k as never))) return null;
+  const train = noTraining();
+  for (const t of TRAIN_IDS) {
+    const n = rawTrain[t] ?? 0;
+    if (!isInt(n, 0, TRAIN_CAP)) return null;
+    train[t] = n;
+  }
+  if (Object.values(train).reduce((a, n) => a + n, 0) > h.level - 1) return null;
+  const hone = h.hone ?? 0;
+  if (!isInt(hone, 0, HONE_MAX)) return null;
+  const weapon = h.weapon ?? 0;
+  if (!isInt(weapon, 0, WEAPON_TIERS.length - 1)) return null;
+  // Saves from before armour wore the tunic.
+  const armors = h.armors ?? [STARTER_ARMOR];
+  if (!Array.isArray(armors) || !armors.length || armors.length > ARMOR_IDS.length || new Set(armors).size !== armors.length) return null;
+  if (!armors.every((a) => ARMOR_IDS.includes(a as ArmorId))) return null;
+  const armor = h.armor ?? STARTER_ARMOR;
+  if (!armors.includes(armor)) return null;
+  const max = heroMax({ classId: h.classId as ClassId, talentId: h.talentId, level: h.level, train, hone, weapon, armor: armor as ArmorId });
+  if (!isInt(h.hp, 0, max.maxHp) || !isInt(h.mp, 0, max.maxMp)) return null;
+
+  const itemIds = Object.keys(ITEMS) as ItemId[];
+  if (Object.keys(items).some((k) => !itemIds.includes(k as ItemId))) return null;
+  const bag = {} as Record<ItemId, number>;
+  for (const id of itemIds) {
+    const n = items[id] ?? 0;
+    if (!isInt(n, 0, 99)) return null;
+    bag[id] = n;
+  }
+
+  if (!isInt(d.gold, 0, 9_999_999)) return null;
+  const path = p.path;
+  if (!Array.isArray(path) || path.length > 16 || !path.every((x) => typeof x === "string") || !validPath(path as string[])) return null;
+  if (!isInt(p.wins, 0, 1e6)) return null;
+  const diff = p.diff ?? "normal"; // v5 saves from before difficulties
+  if (!DIFFICULTY_IDS.includes(diff as DifficultyId)) return null;
+  const t = d.trade;
+  if (!isObj(t) || !isInt(t.seq, 0, 1e9) || !isObj(t.kael)) return null;
+  const stock = t.kael as Record<string, unknown>;
+  if (Object.keys(stock).some((k) => !(k in KAEL_STOCK))) return null;
+  const kael: Partial<Record<ItemId, number>> = {};
+  for (const [id, max] of Object.entries(KAEL_STOCK) as [ItemId, number][]) {
+    if (!isInt(stock[id] ?? 0, 0, max)) return null;
+    kael[id] = (stock[id] as number | undefined) ?? 0;
+  }
+  if (!isInt(d.savedAt, 0, Number.MAX_SAFE_INTEGER)) return null;
+  const pets = parsePets(d.pets ?? freshPets()); // saves from before the farm
+  if (!pets) return null;
+  const knowledge = d.knowledge ?? 0;
+  if (!isInt(knowledge, 0, 1e9)) return null;
+
+  return {
+    version: SAVE_VERSION,
+    hero: {
+      name: name.name,
+      gender: h.gender as Gender,
+      classId: h.classId as ClassId,
+      talentId: h.talentId,
+      look,
+      level: h.level,
+      exp: h.exp,
+      hp: h.hp,
+      mp: h.mp,
+      train,
+      hone,
+      weapon,
+      armor: armor as ArmorId,
+      armors: [...(armors as ArmorId[])],
+    },
+    items: bag,
+    gold: d.gold,
+    knowledge,
+    progress: { path: [...(path as string[])], wins: p.wins, diff: diff as DifficultyId },
+    pets,
+    trade: { seq: t.seq, kael },
+    savedAt: d.savedAt,
+  };
+}
+
+function parsePets(v: unknown): SaveData["pets"] | null {
+  const farm = isObj(v) ? (v.farm ?? 0) : null; // pets from before farm upgrades sit in the first paddock
+  if (!isObj(v) || !isInt(farm, 0, FARM_TIERS.length - 1) || !isInt(v.seq, 0, 1e9) || !Array.isArray(v.list)) return null;
+  if (v.list.length > FARM_TIERS[farm].slots) return null;
+  const list: Pet[] = [];
+  for (const p of v.list) {
+    if (!isObj(p) || !isInt(p.id, 1, v.seq) || !PET_IDS.includes(p.species as PetId) || !isInt(p.xp, 0, 1e7)) return null;
+    const rarity = p.rarity ?? "common";
+    const name = p.name ?? "";
+    const locked = p.locked ?? false;
+    if (!PET_RARITIES.includes(rarity as PetRarity) || typeof locked !== "boolean") return null;
+    if (name !== "") {
+      const c = checkName(name);
+      if (!c.ok || c.name !== name) return null;
+    }
+    if (list.some((q) => q.id === p.id)) return null;
+    list.push({ id: p.id, species: p.species as PetId, rarity: rarity as PetRarity, xp: p.xp, name: name as string, locked });
+  }
+  const w = v.with;
+  if (w !== null && !list.some((p) => p.id === w)) return null;
+  return { seq: v.seq, list, with: w as number | null, farm };
+}
+
+/**
+ * v4 saves had the player shop, since removed by the owner (pure turn-based RPG). Stock left on
+ * its shelves goes back to the bag (capped like any stack) so nothing the player owned is lost.
+ */
+function dropShop(d: Record<string, unknown>): Record<string, unknown> {
+  const { shop, ...rest } = d;
+  const items = isObj(d.items) ? { ...d.items } : d.items;
+  const shelves = isObj(shop) && isObj(shop.shelves) ? Object.values(shop.shelves) : [];
+  for (const sh of shelves)
+    if (isObj(items) && isObj(sh) && typeof sh.item === "string" && sh.item in items && Number.isInteger(sh.qty))
+      items[sh.item] = Math.min(99, (items[sh.item] as number) + (sh.qty as number));
+  return { ...rest, items, version: 3 };
+}
+
+/** v1 saves (creation-only slice) had no journey yet: keep the hero, start the route. */
+function migrateV1(d: Record<string, unknown>): Record<string, unknown> {
+  return { ...d, version: 5, gold: 0, progress: freshProgress(), trade: freshTrade() };
+}
+
+export function parseSettings(raw: string | null): Settings {
+  try {
+    const d = raw ? JSON.parse(raw) : null;
+    if (isObj(d))
+      return {
+        autoTiming: d.autoTiming === true,
+        reducedMotion: d.reducedMotion === true,
+      };
+  } catch {
+    /* fall through to defaults */
+  }
+  return { ...DEFAULT_SETTINGS };
+}
+
+type Store = Pick<Storage, "getItem" | "setItem">;
+
+/** Loads the primary save, falling back to the backup copy if the primary is damaged. */
+export function loadSave(store: Store): SaveData | null {
+  return parseSave(store.getItem(SAVE_KEY)) ?? parseSave(store.getItem(BACKUP_KEY));
+}
+
+/**
+ * Writes a save and verifies it reads back. The previous valid save is kept as a backup
+ * first, so a failed or malformed write never destroys the last good state.
+ */
+export function writeSave(store: Store, data: SaveData): boolean {
+  const json = JSON.stringify(data);
+  if (!parseSave(json)) return false;
+  try {
+    const prev = store.getItem(SAVE_KEY);
+    if (parseSave(prev)) store.setItem(BACKUP_KEY, prev!);
+    store.setItem(SAVE_KEY, json);
+    return store.getItem(SAVE_KEY) === json;
+  } catch {
+    return false;
+  }
+}
